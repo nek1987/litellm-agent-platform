@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { PfpUpload } from "@/components/pfp-upload";
 import {
   ApiError,
   ModelRow,
@@ -36,6 +37,7 @@ export default function NewAgentPage() {
   const [modelQuery, setModelQuery] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [branchOverride, setBranchOverride] = useState("");
+  const [pfpUrl, setPfpUrl] = useState<string | null>(null);
 
   const [models, setModels] = useState<ModelRow[]>([]);
   const [autoTemplate, setAutoTemplate] = useState<TemplateRow | null>(null);
@@ -116,6 +118,7 @@ export default function NewAgentPage() {
         prompt: systemPrompt.trim() || undefined,
         template_id: autoTemplate.id,
         branch: branchOverride.trim() || undefined,
+        pfp_url: pfpUrl ?? undefined,
       });
       router.push(`/agents/${created.id}`);
     } catch (err) {
@@ -142,6 +145,16 @@ export default function NewAgentPage() {
         </CardHeader>
         <CardContent>
           <form className="space-y-5" onSubmit={onSubmit} noValidate>
+            <div className="space-y-1.5">
+              <Label>Profile picture</Label>
+              <PfpUpload
+                name={name}
+                value={pfpUrl}
+                onChange={setPfpUrl}
+                disabled={submitting}
+              />
+            </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="name">Name (optional)</Label>
               <Input
