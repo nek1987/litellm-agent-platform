@@ -18,9 +18,11 @@ import { Label } from "@/components/ui/label";
 import { PfpUpload } from "@/components/pfp-upload";
 import {
   ApiError,
+  McpRow,
   ModelRow,
   TemplateRow,
   createAgent,
+  listMcps,
   listModels,
   listTemplates,
 } from "@/lib/api";
@@ -38,6 +40,10 @@ function repoShortLabel(url: string): string {
   }
 }
 
+function mcpLabel(m: McpRow): string {
+  return m.alias?.trim() || m.server_name?.trim() || m.server_id;
+}
+
 export default function NewAgentPage() {
   const router = useRouter();
 
@@ -51,6 +57,8 @@ export default function NewAgentPage() {
   const [models, setModels] = useState<ModelRow[]>([]);
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [templateId, setTemplateId] = useState<string>("");
+  const [mcps, setMcps] = useState<McpRow[]>([]);
+  const [selectedMcps, setSelectedMcps] = useState<Set<string>>(new Set());
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [metaError, setMetaError] = useState<string | null>(null);
 
@@ -62,13 +70,15 @@ export default function NewAgentPage() {
     async function load() {
       setMetaError(null);
       try {
-        const [modelsRes, templatesRes] = await Promise.all([
+        const [modelsRes, templatesRes, mcpsRes] = await Promise.all([
           listModels().catch(() => [] as ModelRow[]),
           listTemplates().catch(() => [] as TemplateRow[]),
+          listMcps().catch(() => [] as McpRow[]),
         ]);
         if (cancelled) return;
         setModels(modelsRes);
         setTemplates(templatesRes);
+        setMcps(mcpsRes);
         // Auto-select the first ready template, but the user can change it.
         const firstReady = templatesRes.find((t) => t.build_status === "ready");
         if (firstReady) setTemplateId(firstReady.id);
@@ -101,6 +111,19 @@ export default function NewAgentPage() {
     () => templates.find((t) => t.id === templateId) ?? null,
     [templates, templateId],
   );
+
+  const sortedMcps = useMemo(() => {
+    return [...mcps].sort((a, b) => mcpLabel(a).localeCompare(mcpLabel(b)));
+  }, [mcps]);
+
+  function toggleMcp(serverId: string) {
+    setSelectedMcps((prev) => {
+      const next = new Set(prev);
+      if (next.has(serverId)) next.delete(serverId);
+      else next.add(serverId);
+      return next;
+    });
+  }
 
   const sortedModels = useMemo(
     () => [...models].sort((a, b) => a.id.localeCompare(b.id)),
@@ -142,6 +165,8 @@ export default function NewAgentPage() {
         template_id: templateId,
         branch: branchOverride.trim() || undefined,
         pfp_url: pfpUrl ?? undefined,
+        mcp_servers:
+          selectedMcps.size > 0 ? Array.from(selectedMcps) : undefined,
       });
       router.push(`/agents/${created.id}`);
     } catch (err) {
@@ -401,6 +426,80 @@ export default function NewAgentPage() {
                 rows={6}
                 disabled={submitting}
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>MCP servers (optional)</Label>
+              {loadingMeta ? (
+                <p className="text-xs text-muted-foreground">
+                  Loading MCP servers from proxy…
+                </p>
+              ) : sortedMcps.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No MCP servers configured on this proxy. Configure them
+                  under <span className="font-mono">/v1/mcp/server</span>.
+                </p>
+              ) : (
+                <div className="rounded-lg border bg-card">
+                  <ul
+                    role="listbox"
+                    aria-label="MCP servers"
+                    aria-multiselectable
+                    className="divide-y"
+                  >
+                    {sortedMcps.map((m) => {
+                      const selected = selectedMcps.has(m.server_id);
+                      return (
+                        <li key={m.server_id}>
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            onClick={() => toggleMcp(m.server_id)}
+                            disabled={submitting}
+                            className={cn(
+                              "flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                              selected && "bg-accent/30",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "grid size-4 shrink-0 place-items-center rounded-[4px] border transition-colors",
+                                selected
+                                  ? "border-foreground bg-foreground text-background"
+                                  : "border-border bg-transparent",
+                              )}
+                              aria-hidden
+                            >
+                              {selected ? <Check className="size-3" /> : null}
+                            </span>
+                            <span className="flex min-w-0 flex-1 flex-col">
+                              <span className="truncate text-[13px] text-foreground">
+                                {mcpLabel(m)}
+                              </span>
+                              {m.url ? (
+                                <span className="truncate font-mono text-[11px] text-muted-foreground">
+                                  {m.url}
+                                </span>
+                              ) : null}
+                            </span>
+                            {m.transport ? (
+                              <span className="shrink-0 rounded-md border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                                {m.transport}
+                              </span>
+                            ) : null}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+              {selectedMcps.size > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {selectedMcps.size} selected.
+                </p>
+              ) : null}
             </div>
 
             {metaError ? (
