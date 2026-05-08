@@ -187,9 +187,9 @@ export function Sidebar() {
         >
           <span
             aria-hidden
-            className="grid h-[18px] w-[18px] place-items-center rounded-[4px] bg-foreground text-[9px] font-semibold tracking-tight text-background"
+            className="grid h-[20px] w-[20px] place-items-center rounded-[4px] bg-foreground text-[12px] leading-none"
           >
-            L
+            🛬
           </span>
           <span className="text-[13px] font-semibold tracking-tight text-foreground">
             LiteLLM
