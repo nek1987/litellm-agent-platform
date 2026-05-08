@@ -1,6 +1,6 @@
 # LiteLLM Agent Platform
 
-A control plane for **managed agents** running on a [LiteLLM](https://github.com/BerriAI/litellm) proxy. Create agents, spawn sandboxed sessions, watch them stream events back.
+A control plane for **managed agents** running on a [LiteLLM](https://github.com/BerriAI/litellm) AI Gateway. Create agents, spawn sandboxed sessions, watch them stream events back.
 
 Each agent is `(harness, repo)` — e.g. opencode + your monorepo. Spawning a session boots a fresh Fargate task running that harness against that repo. The proxy owns the lifecycle. This UI talks to it.
 
