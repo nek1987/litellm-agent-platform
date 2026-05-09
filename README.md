@@ -116,40 +116,7 @@ curl -X DELETE http://localhost:3000/api/v1/managed_agents/sessions/<session_id>
   -H "Authorization: Bearer <MASTER_KEY>"
 ```
 
-```ts
-const BASE = "http://localhost:3000/api/v1/managed_agents";
-const H = {
-  authorization:  `bearer ${process.env.MASTER_KEY}`,
-  "content-type": "application/json",
-};
-
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const r = await fetch(`${BASE}${path}`, {
-    method,
-    headers: H,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error(`${method} ${path} → ${r.status}`);
-  return r.json() as Promise<T>;
-}
-
-const { id: agentId } = await call<{ id: string }>("POST", "/agents", {
-  model:    "anthropic/claude-sonnet-4-6",
-  repo_url: "https://github.com/BerriAI/litellm",
-});
-
-const { id: sessionId } = await call<{ id: string }>(
-  "POST", `/agents/${agentId}/session`, { title: "smoke" },
-);
-
-const reply = await call<unknown>(
-  "POST", `/sessions/${sessionId}/message`, { text: "List the top-level directories." },
-);
-
-await call("DELETE", `/sessions/${sessionId}`);
-```
-
-Body + response on `/sessions/{id}/message` are the [opencode HTTP API](https://github.com/sst/opencode) verbatim. Reuse a session across messages — `POST /agents/{id}/session` is the slow path.
+Reuse a session across messages — `POST /agents/{id}/session` is the slow path.
 
 ### Endpoints
 
