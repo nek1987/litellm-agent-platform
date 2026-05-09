@@ -1,6 +1,6 @@
 # LiteLLM Agent Platform
 
-We're introducing the **LiteLLM Managed Agents Platform** - a simple, self-hosted infrastructure platform for running multiple agents in production.
+A simple, self-hosted infrastructure platform for running multiple agents in production.
 
 The main benefit of using this is that it will manage:
 - Different sandboxes for different teams/contexts
