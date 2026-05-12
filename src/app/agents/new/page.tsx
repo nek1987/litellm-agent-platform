@@ -322,60 +322,6 @@ export default function NewAgentPage() {
     return sortedModels.filter((m) => m.id.toLowerCase().includes(q));
   }, [sortedModels, modelQuery]);
 
-  function parseEnvFile(text: string): [string, string][] {
-    const pairs: [string, string][] = [];
-    for (const raw of text.split("\n")) {
-      const line = raw.trim();
-      if (!line || line.startsWith("#")) continue;
-      const eq = line.indexOf("=");
-      if (eq < 1) continue;
-      const key = line.slice(0, eq).trim();
-      let val = line.slice(eq + 1).trim();
-      if (
-        (val.startsWith('"') && val.endsWith('"')) ||
-        (val.startsWith("'") && val.endsWith("'"))
-      ) {
-        val = val.slice(1, -1);
-      }
-      if (key) pairs.push([key, val]);
-    }
-    return pairs;
-  }
-
-  function handleEnvFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result;
-      if (typeof text !== "string") return;
-      const parsed = parseEnvFile(text);
-      if (parsed.length === 0) return;
-      setEnvVars((prev) => {
-        const existing = prev.filter(([k]) => k.trim() !== "");
-        return [...existing, ...parsed, ["", ""] as [string, string]];
-      });
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  }
-
-  function setEnvKey(idx: number, key: string) {
-    setEnvVars((prev) => prev.map((p, i) => (i === idx ? [key, p[1]] : p)));
-  }
-  function setEnvVal(idx: number, val: string) {
-    setEnvVars((prev) => prev.map((p, i) => (i === idx ? [p[0], val] : p)));
-  }
-  function addEnvRow() {
-    setEnvVars((prev) => [...prev, ["", ""]]);
-  }
-  function removeEnvRow(idx: number) {
-    setEnvVars((prev) => {
-      const next = prev.filter((_, i) => i !== idx);
-      return next.length === 0 ? [["", ""]] : next;
-    });
-  }
-
   function validate(): string | null {
     const trimmedName = name.trim();
     if (trimmedName.length > NAME_MAX) {
