@@ -104,7 +104,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 # Overlay the full builder node_modules so the migration CLI works.
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=nextjs:nodejs /app/package.json /app/package-lock.json /app/tsconfig.json ./
+
+# Worker source — needed when this image runs as the reconciler worker
+# (k8s/worker.yaml runs `npm run worker` = tsx src/worker/index.ts)
+COPY --from=builder --chown=nextjs:nodejs /app/src/server ./src/server
+COPY --from=builder --chown=nextjs:nodejs /app/src/worker ./src/worker
 
 USER nextjs
 EXPOSE 3000
