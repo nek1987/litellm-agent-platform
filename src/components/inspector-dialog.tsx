@@ -409,6 +409,10 @@ export function InspectorPanel({
   onClose: () => void;
   sessionId: string;
 }) {
+  // Vault used to live in a sibling tab here; it was promoted to a
+  // top-level session-header button (see VaultPanel in
+  // src/components/vault-dialog.tsx) so the wire inspector is now
+  // single-purpose again.
   const [hideHeartbeat, setHideHeartbeat] = useState(true);
   // Persisted per-session preference. We initialize from localStorage on
   // mount (not via useState initializer, which would run on the server too).

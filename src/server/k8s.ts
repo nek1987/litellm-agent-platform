@@ -21,6 +21,8 @@
  *     when running under docker-compose.
  */
 
+import { createHmac } from "node:crypto";
+
 import * as k8s from "@kubernetes/client-node";
 import { fetch } from "undici";
 
@@ -36,6 +38,21 @@ import {
   type RunTaskOpts,
   type TaggedTask,
 } from "@/server/types";
+import type {
+  VaultInterception,
+  VaultInterceptionFingerprint,
+} from "@/lib/vault-types";
+
+// HMAC-derived shared secret for the vault sidecar's /interceptions debug
+// surface. Both sides (platform + vault) recompute this from
+// `MASTER_KEY × task_arn`; vault rejects requests without a matching
+// `X-Vault-Inspect-Token` header. The vault binds on 0.0.0.0 inside the pod
+// so the platform can reach it via pod IP — without this header any
+// pod on the cluster network could harvest stub values from the buffer
+// and use them through the CONNECT proxy. See vault/src/server.ts.
+function vaultInspectToken(task_arn: string): string {
+  return createHmac("sha256", env.MASTER_KEY).update(task_arn).digest("hex");
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -299,7 +316,13 @@ function buildVaultEnv(opts: RunTaskOpts): Array<{ name: string; value: string }
     !Array.isArray(agent.env_vars)
       ? (agent.env_vars as Record<string, string>)
       : {};
-  return Object.entries(raw).map(([k, v]) => ({ name: `REAL_${k}`, value: decrypt(v) }));
+  const out: Array<{ name: string; value: string }> = Object.entries(raw).map(
+    ([k, v]) => ({ name: `REAL_${k}`, value: decrypt(v) }),
+  );
+  // MASTER_KEY is the shared secret both sides hash to derive the
+  // /interceptions auth token. Without it the platform's queries 401.
+  out.push({ name: "MASTER_KEY", value: env.MASTER_KEY });
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +399,8 @@ export async function runTask(
           containers: [
             {
               name: CONTAINER_NAME,
+              // Resolve image at session-creation time from current env vars
+              // so image updates take effect immediately without recreating agents.
               image: resolveHarnessImage(agent.harness_id, env),
               imagePullPolicy: env.K8S_IMAGE_PULL_POLICY,
               ports: [{ containerPort: agent.container_port }],
@@ -384,6 +409,12 @@ export async function runTask(
                 { name: "lap-shared", mountPath: "/lap-shared", readOnly: true },
               ],
               resources: {
+                // Opencode is mostly idle between LLM round-trips — it's a
+                // thin HTTP server forwarding to the model. Right-size the
+                // request so a single-node kind cluster can fit a useful
+                // number of warm + active sandboxes (4 vCPU / ~6GiB usable
+                // typically). Limits stay generous so a chatty session
+                // burst isn't artificially throttled.
                 requests: { cpu: "100m", memory: "256Mi" },
                 limits: { cpu: "1", memory: "1Gi" },
               },
@@ -908,4 +939,70 @@ export async function probeK8s(): Promise<{ ok: true } | { ok: false; error: str
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+// ---------------------------------------------------------------------------
+// fetchVaultInterceptions — pull the debug ring buffer from the vault
+// sidecar inside a sandbox pod. The vault server binds on the pod's IP
+// (port 14322 by default) but isn't published via any Service / NodePort,
+// so this is reachable only from inside the cluster — pod-to-pod from the
+// platform pod to the sandbox pod.
+//
+// Returns `null` when the pod doesn't have an IP yet (sandbox is still
+// scheduling) so callers can render an empty-state row without branching
+// on K8s errors. Any other failure bubbles up — the route handler converts
+// it into a 200 with empty data, mirroring sandbox_logs' lenience.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_VAULT_PORT = 14322;
+const DEFAULT_VAULT_FETCH_TIMEOUT_MS = 5_000;
+
+// Re-export so existing imports (`import { VaultInterception } from "@/server/k8s"`)
+// keep working. The canonical definitions live in `@/lib/vault-types`.
+export type { VaultInterception, VaultInterceptionFingerprint };
+
+async function podIPFor(task_arn: string): Promise<string | null> {
+  try {
+    const res = await coreApi().readNamespacedPod({
+      name: task_arn,
+      namespace: env.K8S_NAMESPACE,
+    });
+    const pod = (res as unknown as { body?: k8s.V1Pod }).body
+      ?? (res as k8s.V1Pod);
+    return pod.status?.podIP ?? null;
+  } catch (err) {
+    if (isNotFound(err)) return null;
+    throw err;
+  }
+}
+
+export async function fetchVaultInterceptions(
+  task_arn: string,
+  opts: { timeoutMs?: number; port?: number } = {},
+): Promise<VaultInterception[] | null> {
+  const port = opts.port ?? DEFAULT_VAULT_PORT;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_VAULT_FETCH_TIMEOUT_MS;
+  const ip = await podIPFor(task_arn);
+  if (!ip) return null;
+  // IPv6 pod IPs need brackets in the URL. IPv4 passes through unchanged.
+  const hostPart = ip.includes(":") ? `[${ip}]` : ip;
+  const url = `http://${hostPart}:${port}/interceptions`;
+  // Shared secret — recomputed identically inside the vault sidecar from
+  // its own pod name (HOSTNAME) and the same MASTER_KEY. Random cluster
+  // pods cannot derive this without holding the master key.
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { "x-vault-inspect-token": vaultInspectToken(task_arn) },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    throw new Error(`vault /interceptions ${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as unknown;
+  if (!Array.isArray(body)) {
+    throw new Error("vault /interceptions: expected JSON array");
+  }
+  // Pass through as-is. We don't re-validate per record — the route handler
+  // streams it straight to the client which has its own typing.
+  return body as VaultInterception[];
 }
