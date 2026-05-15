@@ -38,7 +38,9 @@ def check(label: str, ok: bool, detail: str = "") -> None:
         failures.append(label)
 
 
-# ── 1. Platform health endpoint ──────────────────────────────────────────────
+# ── 1. Platform health + auth (Authorization header, never in URL) ────────────
+# This also implicitly proves that a valid token is accepted — if MASTER_KEY
+# were wrong or the platform were rejecting auth, this returns 401/403, not 200.
 try:
     req = urllib.request.Request(
         f"{ALB_URL}/api/v1/health/k8s",
@@ -51,11 +53,13 @@ except Exception as e:
     check("GET /api/v1/health/k8s → 200", False, str(e))
 
 
-# ── 2. TTY proxy auth ─────────────────────────────────────────────────────────
+# ── 2. TTY proxy rejects invalid token with 401 ───────────────────────────────
+# Only the wrong-token case uses a query param — a throwaway value, no secret
+# in the URL. The valid-token path is already covered by the health check above.
 FAKE_SESSION = "00000000-0000-0000-0000-000000000000"
 
 
-def tty_status(token: str) -> str:
+def tty_ws_status(token: str) -> str:
     """Send a WebSocket upgrade to the TTY proxy; return the HTTP status line."""
     s = socket.socket()
     s.settimeout(10)
@@ -76,18 +80,10 @@ def tty_status(token: str) -> str:
 
 
 try:
-    r = tty_status("intentionally-wrong-token-xyzzy")
+    r = tty_ws_status("intentionally-wrong-token-xyzzy")
     check("TTY bad token → 401", "401" in r, r)
 except Exception as e:
     check("TTY bad token → 401", False, str(e))
-
-try:
-    r = tty_status(MASTER_KEY)
-    # Auth passes → proxy looks up session → not found → 503 (or 101 if warm).
-    # Any response other than 401 means auth is working.
-    check("TTY MASTER_KEY → not-401", "401" not in r, r)
-except Exception as e:
-    check("TTY MASTER_KEY → not-401", False, str(e))
 
 
 # ── Result ────────────────────────────────────────────────────────────────────

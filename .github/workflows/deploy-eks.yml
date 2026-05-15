@@ -24,10 +24,17 @@
 #   MASTER_KEY         Platform master key. Smoke test uses it to verify TTY
 #                      auth passes after every deploy.
 #
-# All secrets above should live in the "production" GitHub Environment
-# (Settings → Environments → production → Secrets), NOT as repo-level secrets.
-# The deploy job references `environment: production` so only that job can
-# read them; the build job cannot.
+# Secret placement:
+#   build-push job has no environment gate, so it can only read REPO secrets.
+#   deploy job references `environment: production` and reads ENVIRONMENT secrets.
+#
+#   Keep as REPO secrets (build-push needs them for ECR auth):
+#     AWS_ROLE_ARN, AWS_ACCOUNT_ID, AWS_REGION
+#
+#   Set as ENVIRONMENT secrets (Settings → Environments → production → Secrets):
+#     EKS_CLUSTER_NAME, MASTER_KEY
+#   (Duplicating AWS_ROLE_ARN / AWS_ACCOUNT_ID / AWS_REGION there is fine too —
+#    environment secrets take precedence for the deploy job.)
 #
 # ── Required GitHub Variables (Settings → Environments → production → Variables)
 #
