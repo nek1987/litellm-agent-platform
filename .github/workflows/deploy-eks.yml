@@ -96,8 +96,11 @@ jobs:
       id-token: write
 
     outputs:
-      # Propagate the fully-qualified image URI to the deploy job.
+      # Propagate image URIs to the deploy job.
       image: ${{ steps.image-tag.outputs.image }}
+      claude_code_image: ${{ steps.harness-claude-code.outputs.image }}
+      claude_sdk_image: ${{ steps.harness-claude-sdk.outputs.image }}
+      opencode_image: ${{ steps.harness-opencode.outputs.image }}
 
     steps:
       - name: Checkout
@@ -139,6 +142,30 @@ jobs:
           docker tag "$IMAGE" "$LATEST"
           docker push "$LATEST"
 
+      - name: Build & push claude-code harness
+        id: harness-claude-code
+        run: |
+          IMG="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/litellm-agent-platform:harness-claude-code-${{ github.sha }}"
+          docker buildx build -f harnesses/claude-code/Dockerfile -t "$IMG" .
+          docker push "$IMG"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push claude-agent-sdk harness
+        id: harness-claude-sdk
+        run: |
+          IMG="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/litellm-agent-platform:harness-claude-sdk-${{ github.sha }}"
+          docker buildx build -f harnesses/claude-agent-sdk/Dockerfile -t "$IMG" .
+          docker push "$IMG"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push opencode harness
+        id: harness-opencode
+        run: |
+          IMG="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/litellm-agent-platform:harness-opencode-${{ github.sha }}"
+          docker buildx build -f harnesses/opencode/Dockerfile -t "$IMG" .
+          docker push "$IMG"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
+
   # ── Job 2: Roll out the new image to EKS deployments ──────────────────────
   deploy:
     name: Deploy to EKS
@@ -167,6 +194,14 @@ jobs:
           aws eks update-kubeconfig \
             --name "${{ secrets.EKS_CLUSTER_NAME }}" \
             --region "${{ secrets.AWS_REGION }}"
+
+      - name: Update harness images in litellm-env secret
+        run: |
+          kubectl patch secret litellm-env -n default -p "{\"data\":{
+            \"K8S_HARNESS_IMAGE_CLAUDE_CODE\":\"$(echo -n '${{ needs.build-push.outputs.claude_code_image }}' | base64 | tr -d '\n')\",
+            \"K8S_HARNESS_IMAGE_CLAUDE_SDK\":\"$(echo -n '${{ needs.build-push.outputs.claude_sdk_image }}' | base64 | tr -d '\n')\",
+            \"K8S_HARNESS_IMAGE_OPENCODE\":\"$(echo -n '${{ needs.build-push.outputs.opencode_image }}' | base64 | tr -d '\n')\"
+          }}"
 
       - name: Update web deployment image
         run: |
