@@ -5,7 +5,7 @@ Claude Code TUI in your terminal — no browser, no portal, no copy-pasting
 URLs. Same feel as `ssh`.
 
 ```
-~/code/payments $ lap claude --agent refactor-bot
+~/code/payments $ lap refactor-bot
   ✓ agent refactor-bot (ac70ab02, harness=claude-code)
   ✓ session 8c12262c
   waiting for sandbox. ready
@@ -39,14 +39,17 @@ Config is written to `~/.lap/config.json` with mode `0600`.
 ## Usage
 
 ```bash
-lap claude --agent <name>     # open a Claude Code TUI session
-lap agents                    # list agents (planned)
+lap <agent-name>              # open the agent's TUI in a sandbox
+lap --agent <name>            # same as above (flag form)
+lap agents                    # list agents on the platform
 lap config                    # show current config
 lap logout                    # delete config
 ```
 
-`--agent` accepts either an agent name or a UUID. Names are resolved via
-`GET /api/v1/managed_agents/agents` at session-create time.
+The agent name accepts either a human name or a UUID. Names are resolved
+via `GET /api/v1/managed_agents/agents` at session-create time. The
+agent's `harness_id` determines which CLI runs inside the sandbox
+(`claude-code`, `codex`, …) — you don't have to say.
 
 Press **Ctrl-D** in the attached session to detach. The remote session
 stays alive (idle reaper kicks in after 24h with no activity).
