@@ -308,7 +308,19 @@ async function buildContainerEnv(
     // point it at the mounted vault CA so those runtimes trust the proxy too.
     HTTPS_PROXY: "http://127.0.0.1:14322",
     HTTP_PROXY: "http://127.0.0.1:14322",
-    NO_PROXY: "localhost,127.0.0.1,.svc.cluster.local,.svc,.cluster.local",
+    // Bypass vault for Anthropic API and LiteLLM — sandbox pods reach these
+    // directly; the vault MITM doesn't need to intercept them (no credential
+    // stubs to swap). LiteLLM hostname is derived from LITELLM_API_BASE so
+    // this stays correct when the proxy URL changes.
+    NO_PROXY: [
+      "localhost",
+      "127.0.0.1",
+      ".svc.cluster.local",
+      ".svc",
+      ".cluster.local",
+      "api.anthropic.com",
+      (() => { try { return new URL(env.LITELLM_API_BASE).hostname; } catch { return ""; } })(),
+    ].filter(Boolean).join(","),
     NODE_EXTRA_CA_CERTS: "/etc/vault-ca/tls.crt",
     VAULT_ENABLED: "true",
   };
