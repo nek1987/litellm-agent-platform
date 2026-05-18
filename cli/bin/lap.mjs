@@ -212,7 +212,8 @@ async function printSessionDiagnostics(cfg, sid, lastSession, headline) {
   for (const [k, v] of fields) {
     if (v === undefined || v === null || v === "") continue;
     const label = (k + ":").padEnd(16);
-    console.error(`    ${ansi.dim(label)}${v}`);
+    const display = typeof v === "string" ? v : JSON.stringify(v);
+    console.error(`    ${ansi.dim(label)}${display}`);
   }
   console.error(`\n    ${ansi.dim("please share this block when reporting the issue.")}`);
 }

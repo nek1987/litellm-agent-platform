@@ -978,7 +978,9 @@ export async function execFilesIntoContainer(
   const execApi = new k8s.Exec(kc);
 
   for (const file of files) {
-    const dest = file.sandbox_path.replace(/^~(?=\/|$)/, "/root");
+    // Don't pre-expand ~ in Node — the container may not run as root.
+    // Pass the raw path and let the shell expand ~ via $HOME.
+    const dest = file.sandbox_path;
     const content = Buffer.from(file.content, "base64");
 
     const execPromise = new Promise<void>((resolve, reject) => {
@@ -988,9 +990,9 @@ export async function execFilesIntoContainer(
           env.K8S_NAMESPACE,
           task_arn,
           CONTAINER_NAME,
-          // $1 is the destination path; pass it as positional arg to avoid
-          // shell-quoting issues with paths containing special characters.
-          ["sh", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "--", dest],
+          // Expand a leading ~ to $HOME inside the container, then write.
+          // $1 is passed as a positional arg to avoid shell-quoting issues.
+          ["sh", "-c", 'p=$(echo "$1" | sed "s|^~|$HOME|"); mkdir -p "$(dirname "$p")" && cat > "$p"', "--", dest],
           null,
           null,
           stdin,
@@ -1009,7 +1011,20 @@ export async function execFilesIntoContainer(
           stdin.write(content);
           stdin.end();
         })
-        .catch(reject);
+        .catch((wsErr: unknown) => {
+            // k8s WebSocketHandler rejects with a WebSocket ErrorEvent (not an
+            // Error instance) when the exec connection fails. Wrap it so the
+            // outer catch can read a useful message instead of "[object Object]".
+            if (wsErr instanceof Error) {
+              reject(wsErr);
+            } else if (wsErr && typeof wsErr === "object") {
+              const e = wsErr as { message?: string; error?: { message?: string } };
+              const msg = e.message ?? e.error?.message ?? JSON.stringify(wsErr);
+              reject(new Error(`exec WebSocket error: ${msg}`));
+            } else {
+              reject(new Error(`exec WebSocket error: ${String(wsErr)}`));
+            }
+          });
     });
 
     const timeoutPromise = new Promise<void>((_, reject) =>
