@@ -16,7 +16,7 @@
  * device and are covered by integration tests.
  */
 
-import { describe, it, before, after, mock } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 
