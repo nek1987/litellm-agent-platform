@@ -184,8 +184,6 @@ export default function ProjectsPage() {
     });
   }
 
-  
-
   return (
     <div className="mx-auto w-full max-w-5xl px-6 py-8">
       <div className="mb-6 flex items-center justify-between border-b pb-4">

@@ -64,7 +64,7 @@ function TagInput({
         <span key={v} className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
           {v}
           {!disabled && (
-            <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(value.filter((x) => x !== v))} className="text-muted-foreground hover:text-foreground focus-visible:outline-none">
+            <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(value.filter((x) => x !== v))} className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
               <X className="size-2.5" aria-hidden />
             </button>
           )}
@@ -223,12 +223,12 @@ export default function NewProjectPage() {
 
         <div className="space-y-1.5">
           <Label htmlFor="name">Name</Label>
-          <Input id="name" value={name} maxLength={64} onChange={(e) => setName(e.target.value)} placeholder="security-pr-scan" disabled={submitting} required />
+          <Input id="name" value={name} maxLength={64} onChange={(e) => setName(e.target.value)} placeholder="security-pr-scan…" autoComplete="off" disabled={submitting} required />
         </div>
 
         <div className="space-y-1.5">
           <Label htmlFor="repo-url">GitHub Repo URL</Label>
-          <Input id="repo-url" type="url" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" disabled={submitting} className="font-mono text-xs" />
+          <Input id="repo-url" type="url" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo…" autoComplete="url" disabled={submitting} className="font-mono text-xs" />
         </div>
 
         <div className="space-y-2">
@@ -259,7 +259,7 @@ export default function NewProjectPage() {
               ))}
             </ul>
             <div className="border-t px-3 py-2">
-              <button type="button" onClick={addRow} disabled={submitting} className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+              <button type="button" onClick={addRow} disabled={submitting} className="flex items-center gap-1 rounded text-[11px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-40">
                 <Plus className="size-3" aria-hidden />
                 Add variable
               </button>
@@ -344,7 +344,7 @@ export default function NewProjectPage() {
                       <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                         Sandbox path
                         <Tooltip.Root>
-                          <Tooltip.Trigger className="inline-flex cursor-default focus-visible:outline-none">
+                          <Tooltip.Trigger className="inline-flex cursor-default rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
                             <Info className="size-3 text-muted-foreground/60" aria-hidden />
                             <span className="sr-only">About sandbox path</span>
                           </Tooltip.Trigger>
