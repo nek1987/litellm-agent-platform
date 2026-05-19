@@ -1863,15 +1863,27 @@ function Composer({
           return;
         }
       }
+      // All pasted files staged successfully — clear any prior paste error
+      // (e.g. an earlier bad-MIME paste) so the composer footer doesn't
+      // keep showing a stale red message after the user has visibly
+      // recovered with a valid paste.
+      setError(null);
     },
     [attachments.length, stageFile, setError],
   );
 
   const handleRemoveAttachment = useCallback(
     (idx: number) => {
-      setAttachments((prev) => prev.filter((_, i) => i !== idx));
+      setAttachments((prev) => {
+        const next = prev.filter((_, i) => i !== idx);
+        // Removing the last failed-context attachment is the user's signal
+        // that they've moved past whatever validation issue they hit; clear
+        // any lingering paste error so the footer matches composer state.
+        if (next.length === 0) setError(null);
+        return next;
+      });
     },
-    [setAttachments],
+    [setAttachments, setError],
   );
 
   return (
