@@ -8,19 +8,19 @@ import { Tooltip } from "@base-ui/react/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { LocalTemplate, SandboxFile } from "../page";
-import { SANDBOX_TEMPLATES_STORAGE_KEY } from "@/lib/constants";
+import type { LocalProject, SandboxFile } from "../page";
+import { PROJECTS_STORAGE_KEY } from "@/lib/constants";
 
-function loadLocalTemplates(): LocalTemplate[] {
+function loadLocalProjects(): LocalProject[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(SANDBOX_TEMPLATES_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as LocalTemplate[]) : [];
+    const raw = window.localStorage.getItem(PROJECTS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as LocalProject[]) : [];
   } catch { return []; }
 }
 
-function saveLocalTemplates(ts: LocalTemplate[]): void {
-  try { window.localStorage.setItem(SANDBOX_TEMPLATES_STORAGE_KEY, JSON.stringify(ts)); } catch { /* ignore */ }
+function saveLocalProjects(ts: LocalProject[]): void {
+  try { window.localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(ts)); } catch { /* ignore */ }
 }
 
 function generateId(): string {
@@ -64,7 +64,7 @@ function TagInput({
         <span key={v} className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
           {v}
           {!disabled && (
-            <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(value.filter((x) => x !== v))} className="text-muted-foreground hover:text-foreground focus-visible:outline-none">
+            <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(value.filter((x) => x !== v))} className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
               <X className="size-2.5" aria-hidden />
             </button>
           )}
@@ -82,7 +82,7 @@ function TagInput({
   );
 }
 
-export default function NewTemplatePage() {
+export default function NewProjectPage() {
   const router = useRouter();
 
   const [name, setName] = useState("");
@@ -181,7 +181,7 @@ export default function NewTemplatePage() {
       .map(({ id: _id, ...fd }) => fd);
 
     const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    const template: LocalTemplate = {
+    const project: LocalProject = {
       id: `${slug}-${generateId()}`,
       name: name.trim(),
       description: "",
@@ -202,14 +202,14 @@ export default function NewTemplatePage() {
       source: "local",
     };
 
-    saveLocalTemplates([...loadLocalTemplates(), template]);
-    router.push("/templates");
+    saveLocalProjects([...loadLocalProjects(), project]);
+    router.push("/projects");
   }
 
   return (
     <div className="mx-auto w-full max-w-2xl px-6 py-8">
       <div className="mb-6 border-b pb-4">
-        <h1 className="text-[22px] font-semibold tracking-tight text-foreground">New Template</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight text-foreground">New Project</h1>
         <p className="mt-0.5 text-[13px] text-muted-foreground">Sandbox config — repo, env vars, and network egress.</p>
       </div>
 
@@ -223,12 +223,12 @@ export default function NewTemplatePage() {
 
         <div className="space-y-1.5">
           <Label htmlFor="name">Name</Label>
-          <Input id="name" value={name} maxLength={64} onChange={(e) => setName(e.target.value)} placeholder="security-pr-scan" disabled={submitting} required />
+          <Input id="name" value={name} maxLength={64} onChange={(e) => setName(e.target.value)} placeholder="security-pr-scan…" autoComplete="off" disabled={submitting} required />
         </div>
 
         <div className="space-y-1.5">
           <Label htmlFor="repo-url">GitHub Repo URL</Label>
-          <Input id="repo-url" type="url" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" disabled={submitting} className="font-mono text-xs" />
+          <Input id="repo-url" type="url" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo…" autoComplete="url" disabled={submitting} className="font-mono text-xs" />
         </div>
 
         <div className="space-y-2">
@@ -259,7 +259,7 @@ export default function NewTemplatePage() {
               ))}
             </ul>
             <div className="border-t px-3 py-2">
-              <button type="button" onClick={addRow} disabled={submitting} className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+              <button type="button" onClick={addRow} disabled={submitting} className="flex items-center gap-1 rounded text-[11px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-40">
                 <Plus className="size-3" aria-hidden />
                 Add variable
               </button>
@@ -344,7 +344,7 @@ export default function NewTemplatePage() {
                       <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                         Sandbox path
                         <Tooltip.Root>
-                          <Tooltip.Trigger className="inline-flex cursor-default focus-visible:outline-none">
+                          <Tooltip.Trigger className="inline-flex cursor-default rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
                             <Info className="size-3 text-muted-foreground/60" aria-hidden />
                             <span className="sr-only">About sandbox path</span>
                           </Tooltip.Trigger>
@@ -386,9 +386,9 @@ export default function NewTemplatePage() {
 
         <div className="flex items-center gap-3 border-t pt-4">
           <Button type="submit" disabled={submitting}>
-            {submitting ? <><Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden />Creating…</> : <>Create Template</>}
+            {submitting ? <><Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden />Creating…</> : <>Create Project</>}
           </Button>
-          <Button type="button" variant="ghost" disabled={submitting} onClick={() => router.push("/templates")}>
+          <Button type="button" variant="ghost" disabled={submitting} onClick={() => router.push("/projects")}>
             Cancel
           </Button>
         </div>
