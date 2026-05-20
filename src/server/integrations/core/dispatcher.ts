@@ -31,6 +31,9 @@
 
 import { prisma } from "@/server/db";
 import { env } from "@/server/env";
+import { harnessOpenEventStream } from "@/server/harness";
+import { foldSdkMessages, deriveTurnView } from "@/lib/fold-sdk-messages";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { getProvider } from "./registry";
 import type {
   Integration,
@@ -314,11 +317,11 @@ async function spawnSessionForEvent(
         external_ref: input.external_ref,
       },
     });
-    // The session create endpoint returns immediately with status=creating;
-    // the initial_prompt is processed once the pod is up. Poll for the
-    // resulting Session.response and forward it to the integration so the
-    // user actually gets the agent's answer back in their medium.
-    void pollAndForwardInitialResponse(session.id);
+    // Tail the agent's live event stream (same source the UI renders) and
+    // forward each turn to the integration as a streaming message — text plus
+    // a "doing now" subtext — so the user watches progress in their medium
+    // instead of waiting for one final blob.
+    void streamForwardToIntegration(session.id);
     return { session_id: session.id };
   } catch (err) {
     console.error("[integrations/dispatcher] spawn failed:", err);
@@ -536,58 +539,174 @@ function isReusableSession(
 }
 
 // ---------------------------------------------------------------------------
-// Response polling: the session create endpoint runs bring-up asynchronously
-// and returns a `creating` row immediately. The agent's reply to the initial
-// prompt lands in `Session.response` once bring-up + the first harness round
-// trip both complete. We poll for it and emit a `response` SessionEvent so
-// the originating integration can post the answer back to the user.
+// Live forwarding: tail the harness event stream — the same SDK frames the UI
+// renders — and forward each turn to the originating integration as a
+// streaming message. `foldSdkMessages` + `deriveTurnView` (shared with the UI)
+// turn raw frames into { text, activity }; the provider posts once per turn
+// then edits it in place (Slack chat.update). Replaces the old "poll
+// Session.response for one final blob" model: it streams progress, survives
+// long turns, and forwards every turn (incl. follow-ups), not just the first.
 // ---------------------------------------------------------------------------
 
-const POLL_INTERVAL_MS = 2_000;
-const POLL_DEADLINE_MS = 5 * 60_000;
+const STREAM_READY_TIMEOUT_MS = 90_000;
+const STREAM_READY_POLL_MS = 1_500;
+const STREAM_DEADLINE_MS = 30 * 60_000;
+const STREAM_THROTTLE_MS = 1_200;
 
-async function pollAndForwardInitialResponse(
+async function waitForSessionReadyRow(
   session_id: string,
-): Promise<void> {
-  const deadline = Date.now() + POLL_DEADLINE_MS;
+): Promise<{ sandbox_url: string; harness_session_id: string } | null> {
+  const deadline = Date.now() + STREAM_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     const row = await prisma.session.findUnique({
       where: { session_id },
-      select: { status: true, response: true, failure_reason: true },
+      select: {
+        status: true,
+        sandbox_url: true,
+        harness_session_id: true,
+        failure_reason: true,
+      },
     });
-    if (!row) return; // session was deleted under us
+    if (!row || row.status === "dead") return null;
     if (row.status === "failed") {
       await forwardSessionEvent(session_id, {
         type: "error",
         body: row.failure_reason ?? "session failed to start",
-      }).catch(() => {
-        /* best-effort */
-      });
-      return;
+      }).catch(() => {});
+      return null;
     }
-    if (row.status === "dead") return; // stopped externally
-    if (row.response) {
+    if (row.status === "ready" && row.sandbox_url && row.harness_session_id) {
+      return {
+        sandbox_url: row.sandbox_url,
+        harness_session_id: row.harness_session_id,
+      };
+    }
+    await new Promise((r) => setTimeout(r, STREAM_READY_POLL_MS));
+  }
+  return null;
+}
+
+function lastAssistantFolded(
+  folded: ReturnType<typeof foldSdkMessages>,
+): ReturnType<typeof foldSdkMessages>[number] | undefined {
+  for (let i = folded.length - 1; i >= 0; i--) {
+    if (folded[i].type === "assistant") return folded[i];
+  }
+  return undefined;
+}
+
+async function streamForwardToIntegration(session_id: string): Promise<void> {
+  const ready = await waitForSessionReadyRow(session_id);
+  if (!ready) return;
+  const { sandbox_url, harness_session_id } = ready;
+
+  const ctl = new AbortController();
+  const deadline = setTimeout(() => ctl.abort(), STREAM_DEADLINE_MS);
+  const sdk: SDKMessage[] = [];
+  let turnIndex = 0;
+  let lastSentAt = 0;
+  let lastKey = "";
+  let sentAny = false;
+
+  const emit = async (final: boolean) => {
+    const fa = lastAssistantFolded(foldSdkMessages(sdk));
+    if (!fa) return;
+    const { text, activity } = deriveTurnView(fa);
+    if (!text && !activity) return;
+    const dedup = `${turnIndex}|${text}|${final ? "" : activity}`;
+    if (!final && dedup === lastKey) return;
+    lastKey = dedup;
+    sentAny = true;
+    await forwardSessionEvent(session_id, {
+      type: "response",
+      body: text,
+      activity,
+      streamKey: `${session_id}#${turnIndex}`,
+      final,
+      externalUrls: viewSessionUrls(session_id),
+    }).catch(() => {});
+  };
+
+  try {
+    const res = await harnessOpenEventStream({ sandbox_url, signal: ctl.signal });
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const dataLine = buf
+          .slice(0, idx)
+          .split("\n")
+          .find((l) => l.startsWith("data:"));
+        buf = buf.slice(idx + 2);
+        if (!dataLine) continue;
+        let evt: {
+          type?: string;
+          properties?: { sessionID?: string; message?: SDKMessage };
+        };
+        try {
+          evt = JSON.parse(dataLine.slice(5).trim());
+        } catch {
+          continue;
+        }
+        const sid = evt.properties?.sessionID;
+        if (sid && sid !== harness_session_id) continue;
+        if (evt.type === "claude_sdk_message" && evt.properties?.message) {
+          sdk.push(evt.properties.message);
+          const now = Date.now();
+          if (now - lastSentAt > STREAM_THROTTLE_MS) {
+            lastSentAt = now;
+            await emit(false);
+          }
+        } else if (evt.type === "session.idle") {
+          await emit(true);
+          turnIndex += 1;
+          lastSentAt = 0;
+          lastKey = "";
+        } else if (
+          evt.type === "session.error" ||
+          evt.type === "session.aborted"
+        ) {
+          await emit(true);
+        }
+      }
+    }
+  } catch {
+    // Stream dropped / aborted — fall back to the persisted reply below.
+  } finally {
+    clearTimeout(deadline);
+  }
+
+  // Fallback: if the stream produced nothing (connected too late, or dropped
+  // before any frame), forward the persisted final reply once so the user
+  // still gets an answer.
+  if (!sentAny) {
+    const row = await prisma.session
+      .findUnique({
+        where: { session_id },
+        select: { status: true, response: true, failure_reason: true },
+      })
+      .catch(() => null);
+    if (row?.status === "failed") {
+      await forwardSessionEvent(session_id, {
+        type: "error",
+        body: row.failure_reason ?? "session failed to start",
+      }).catch(() => {});
+    } else if (row?.response) {
       const text = extractTextFromHarnessReply(row.response);
       if (text) {
         await forwardSessionEvent(session_id, {
           type: "response",
           body: text,
           externalUrls: viewSessionUrls(session_id),
-        }).catch(() => {
-          /* best-effort */
-        });
-        return;
+        }).catch(() => {});
       }
     }
   }
-  // Hit the 5-minute cap. Tell the user instead of silently giving up.
-  await forwardSessionEvent(session_id, {
-    type: "error",
-    body: "Agent didn't reply within 5 minutes.",
-  }).catch(() => {
-    /* best-effort */
-  });
 }
 
 /**

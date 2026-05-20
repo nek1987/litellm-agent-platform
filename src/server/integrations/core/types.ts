@@ -243,7 +243,21 @@ export type SessionEvent =
       externalUrls?: { url: string; label: string }[];
     }
   | { type: "action"; action: string; parameter: string; result?: string }
-  | { type: "response"; body: string; externalUrls?: { url: string; label: string }[] }
+  | {
+      type: "response";
+      body: string;
+      externalUrls?: { url: string; label: string }[];
+      /**
+       * Live-streaming fields (optional). When `streamKey` is set, the provider
+       * posts the message on first sight of that key and edits it in place on
+       * later updates (Slack chat.update) so one message streams instead of
+       * spamming the thread. `activity` is the muted "what it's doing now"
+       * subtext (e.g. "Reading: …/file.py"); `final` marks the last update.
+       */
+      streamKey?: string;
+      activity?: string;
+      final?: boolean;
+    }
   | { type: "error"; body: string }
   | { type: "elicit"; body: string }
   /**
