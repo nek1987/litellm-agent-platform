@@ -475,6 +475,22 @@ export default function AgentDetailPage({ params }: PageProps) {
               <dt className="text-muted-foreground">Branch</dt>
               <dd className="font-mono text-[13px]">{agent.branch}</dd>
 
+              {agent.repo_url ? (
+                <>
+                  <dt className="text-muted-foreground">Repo</dt>
+                  <dd className="min-w-0 font-mono text-[13px] break-all">
+                    <a
+                      href={agent.repo_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline-offset-2 hover:underline"
+                    >
+                      {agent.repo_url}
+                    </a>
+                  </dd>
+                </>
+              ) : null}
+
               <dt className="text-muted-foreground">MCP servers</dt>
               <dd>
                 {agent.mcp_servers && agent.mcp_servers.length > 0 ? (

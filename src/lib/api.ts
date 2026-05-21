@@ -197,6 +197,8 @@ export interface AgentRow {
   created_at?: string | null;
   session_count?: number;
   has_active_session?: boolean;
+  /** GitHub / git repository URL the agent is connected to. */
+  repo_url?: string | null;
   /** Projects attached to this agent (brain-inline harness only). */
   projects?: ProjectConfig[];
 }
