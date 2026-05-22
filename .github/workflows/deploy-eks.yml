@@ -199,15 +199,20 @@ jobs:
             docker push "$IMG"
           else
             echo "claude-code unchanged — checking ECR for SHA tag"
-            if aws ecr describe-images --repository-name litellm-agent-platform \
-                 --image-ids imageTag="$(basename "$IMG" | sed 's/.*://')" \
-                 --region "${{ secrets.AWS_REGION }}" &>/dev/null; then
-              echo "SHA tag already in ECR — nothing to do"
-              exit 0
-            elif docker pull "$LATEST" 2>/dev/null; then
-              docker tag "$LATEST" "$IMG" && docker push "$IMG"
+            MANIFEST=$(aws ecr batch-get-image \
+              --repository-name litellm-agent-platform \
+              --image-ids imageTag="${LATEST##*:}" \
+              --region "${{ secrets.AWS_REGION }}" \
+              --query "images[0].imageManifest" --output text 2>/dev/null || true)
+            if [ -n "$MANIFEST" ] && [ "$MANIFEST" != "None" ]; then
+              echo "Retagging via ECR manifest copy (no pull needed)"
+              aws ecr put-image \
+                --repository-name litellm-agent-platform \
+                --image-tag "${IMG##*:}" \
+                --region "${{ secrets.AWS_REGION }}" \
+                --image-manifest "$MANIFEST"
             else
-              echo "claude-code: not in ECR — building"
+              echo "No :latest in ECR — building"
               docker buildx build -f "$DOCKERFILE" -t "$IMG" .
               docker push "$IMG"
             fi
@@ -236,15 +241,20 @@ jobs:
             docker push "$IMG"
           else
             echo "claude-agent-sdk unchanged — checking ECR for SHA tag"
-            if aws ecr describe-images --repository-name litellm-agent-platform \
-                 --image-ids imageTag="$(basename "$IMG" | sed 's/.*://')" \
-                 --region "${{ secrets.AWS_REGION }}" &>/dev/null; then
-              echo "SHA tag already in ECR — nothing to do"
-              exit 0
-            elif docker pull "$LATEST" 2>/dev/null; then
-              docker tag "$LATEST" "$IMG" && docker push "$IMG"
+            MANIFEST=$(aws ecr batch-get-image \
+              --repository-name litellm-agent-platform \
+              --image-ids imageTag="${LATEST##*:}" \
+              --region "${{ secrets.AWS_REGION }}" \
+              --query "images[0].imageManifest" --output text 2>/dev/null || true)
+            if [ -n "$MANIFEST" ] && [ "$MANIFEST" != "None" ]; then
+              echo "Retagging via ECR manifest copy (no pull needed)"
+              aws ecr put-image \
+                --repository-name litellm-agent-platform \
+                --image-tag "${IMG##*:}" \
+                --region "${{ secrets.AWS_REGION }}" \
+                --image-manifest "$MANIFEST"
             else
-              echo "claude-agent-sdk: not in ECR — building"
+              echo "No :latest in ECR — building"
               docker buildx build -f "$DOCKERFILE" -t "$IMG" .
               docker push "$IMG"
             fi
@@ -273,15 +283,20 @@ jobs:
             docker push "$IMG"
           else
             echo "opencode unchanged — checking ECR for SHA tag"
-            if aws ecr describe-images --repository-name litellm-agent-platform \
-                 --image-ids imageTag="$(basename "$IMG" | sed 's/.*://')" \
-                 --region "${{ secrets.AWS_REGION }}" &>/dev/null; then
-              echo "SHA tag already in ECR — nothing to do"
-              exit 0
-            elif docker pull "$LATEST" 2>/dev/null; then
-              docker tag "$LATEST" "$IMG" && docker push "$IMG"
+            MANIFEST=$(aws ecr batch-get-image \
+              --repository-name litellm-agent-platform \
+              --image-ids imageTag="${LATEST##*:}" \
+              --region "${{ secrets.AWS_REGION }}" \
+              --query "images[0].imageManifest" --output text 2>/dev/null || true)
+            if [ -n "$MANIFEST" ] && [ "$MANIFEST" != "None" ]; then
+              echo "Retagging via ECR manifest copy (no pull needed)"
+              aws ecr put-image \
+                --repository-name litellm-agent-platform \
+                --image-tag "${IMG##*:}" \
+                --region "${{ secrets.AWS_REGION }}" \
+                --image-manifest "$MANIFEST"
             else
-              echo "opencode: not in ECR — building"
+              echo "No :latest in ECR — building"
               docker buildx build -f "$DOCKERFILE" -t "$IMG" .
               docker push "$IMG"
             fi
@@ -310,15 +325,20 @@ jobs:
             docker push "$IMG"
           else
             echo "codex unchanged — checking ECR for SHA tag"
-            if aws ecr describe-images --repository-name litellm-agent-platform \
-                 --image-ids imageTag="$(basename "$IMG" | sed 's/.*://')" \
-                 --region "${{ secrets.AWS_REGION }}" &>/dev/null; then
-              echo "SHA tag already in ECR — nothing to do"
-              exit 0
-            elif docker pull "$LATEST" 2>/dev/null; then
-              docker tag "$LATEST" "$IMG" && docker push "$IMG"
+            MANIFEST=$(aws ecr batch-get-image \
+              --repository-name litellm-agent-platform \
+              --image-ids imageTag="${LATEST##*:}" \
+              --region "${{ secrets.AWS_REGION }}" \
+              --query "images[0].imageManifest" --output text 2>/dev/null || true)
+            if [ -n "$MANIFEST" ] && [ "$MANIFEST" != "None" ]; then
+              echo "Retagging via ECR manifest copy (no pull needed)"
+              aws ecr put-image \
+                --repository-name litellm-agent-platform \
+                --image-tag "${IMG##*:}" \
+                --region "${{ secrets.AWS_REGION }}" \
+                --image-manifest "$MANIFEST"
             else
-              echo "codex: not in ECR — building"
+              echo "No :latest in ECR — building"
               docker buildx build -f "$DOCKERFILE" -t "$IMG" .
               docker push "$IMG"
             fi
@@ -347,15 +367,20 @@ jobs:
             docker push "$IMG"
           else
             echo "hermes unchanged — checking ECR for SHA tag"
-            if aws ecr describe-images --repository-name litellm-agent-platform \
-                 --image-ids imageTag="$(basename "$IMG" | sed 's/.*://')" \
-                 --region "${{ secrets.AWS_REGION }}" &>/dev/null; then
-              echo "SHA tag already in ECR — nothing to do"
-              exit 0
-            elif docker pull "$LATEST" 2>/dev/null; then
-              docker tag "$LATEST" "$IMG" && docker push "$IMG"
+            MANIFEST=$(aws ecr batch-get-image \
+              --repository-name litellm-agent-platform \
+              --image-ids imageTag="${LATEST##*:}" \
+              --region "${{ secrets.AWS_REGION }}" \
+              --query "images[0].imageManifest" --output text 2>/dev/null || true)
+            if [ -n "$MANIFEST" ] && [ "$MANIFEST" != "None" ]; then
+              echo "Retagging via ECR manifest copy (no pull needed)"
+              aws ecr put-image \
+                --repository-name litellm-agent-platform \
+                --image-tag "${IMG##*:}" \
+                --region "${{ secrets.AWS_REGION }}" \
+                --image-manifest "$MANIFEST"
             else
-              echo "hermes: not in ECR — building"
+              echo "No :latest in ECR — building"
               docker buildx build -f "$DOCKERFILE" -t "$IMG" .
               docker push "$IMG"
             fi
@@ -384,15 +409,20 @@ jobs:
             docker push "$IMG"
           else
             echo "gemini unchanged — checking ECR for SHA tag"
-            if aws ecr describe-images --repository-name litellm-agent-platform \
-                 --image-ids imageTag="$(basename "$IMG" | sed 's/.*://')" \
-                 --region "${{ secrets.AWS_REGION }}" &>/dev/null; then
-              echo "SHA tag already in ECR — nothing to do"
-              exit 0
-            elif docker pull "$LATEST" 2>/dev/null; then
-              docker tag "$LATEST" "$IMG" && docker push "$IMG"
+            MANIFEST=$(aws ecr batch-get-image \
+              --repository-name litellm-agent-platform \
+              --image-ids imageTag="${LATEST##*:}" \
+              --region "${{ secrets.AWS_REGION }}" \
+              --query "images[0].imageManifest" --output text 2>/dev/null || true)
+            if [ -n "$MANIFEST" ] && [ "$MANIFEST" != "None" ]; then
+              echo "Retagging via ECR manifest copy (no pull needed)"
+              aws ecr put-image \
+                --repository-name litellm-agent-platform \
+                --image-tag "${IMG##*:}" \
+                --region "${{ secrets.AWS_REGION }}" \
+                --image-manifest "$MANIFEST"
             else
-              echo "gemini: not in ECR — building"
+              echo "No :latest in ECR — building"
               docker buildx build -f "$DOCKERFILE" -t "$IMG" .
               docker push "$IMG"
             fi
@@ -421,15 +451,20 @@ jobs:
             docker push "$IMG"
           else
             echo "executor unchanged — checking ECR for SHA tag"
-            if aws ecr describe-images --repository-name litellm-agent-platform \
-                 --image-ids imageTag="$(basename "$IMG" | sed 's/.*://')" \
-                 --region "${{ secrets.AWS_REGION }}" &>/dev/null; then
-              echo "SHA tag already in ECR — nothing to do"
-              exit 0
-            elif docker pull "$LATEST" 2>/dev/null; then
-              docker tag "$LATEST" "$IMG" && docker push "$IMG"
+            MANIFEST=$(aws ecr batch-get-image \
+              --repository-name litellm-agent-platform \
+              --image-ids imageTag="${LATEST##*:}" \
+              --region "${{ secrets.AWS_REGION }}" \
+              --query "images[0].imageManifest" --output text 2>/dev/null || true)
+            if [ -n "$MANIFEST" ] && [ "$MANIFEST" != "None" ]; then
+              echo "Retagging via ECR manifest copy (no pull needed)"
+              aws ecr put-image \
+                --repository-name litellm-agent-platform \
+                --image-tag "${IMG##*:}" \
+                --region "${{ secrets.AWS_REGION }}" \
+                --image-manifest "$MANIFEST"
             else
-              echo "executor: not in ECR — building"
+              echo "No :latest in ECR — building"
               docker buildx build -f "$DOCKERFILE" -t "$IMG" .
               docker push "$IMG"
             fi
