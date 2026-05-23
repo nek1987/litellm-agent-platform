@@ -26,9 +26,39 @@ import { Sandbox } from "e2b";
 const API_KEY = process.env.E2B_API_KEY;
 const TEMPLATE = process.env.E2B_TEMPLATE || "base";
 const EXECUTE_TIMEOUT_MS = Number(process.env.SANDBOX_EXECUTE_TIMEOUT_MS) || 120_000;
+// E2B auto-kills the sandbox after this idle window. Bounds the cost of any
+// leaked VM (e.g. a name reused across sessions, or a crash before cleanup).
+const SANDBOX_TIMEOUT_MS = Number(process.env.SANDBOX_TIMEOUT_MS) || 900_000;
 
-// label -> e2b sandboxId, so execute() can reconnect by the name provision() used.
+// label -> e2b sandboxId, so execute() can reconnect by the name provision()
+// used. NOTE: this Map is process-wide. opencode runs one shared `opencode
+// serve` across all sessions, and a stdio MCP has no per-session context, so
+// sandbox names share a single namespace. Reusing a name kills the previous
+// sandbox (see provision) to avoid leaking it.
 const sandboxes = new Map();
+
+async function killSandbox(id) {
+  try {
+    await Sandbox.kill(id, { apiKey: API_KEY });
+  } catch (err) {
+    console.error(`[sandbox-mcp] kill ${id} failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+// Best-effort cleanup so we don't leave billed VMs running when the harness
+// shuts down (deploy, scale-down, crash).
+let cleaningUp = false;
+async function cleanupAll() {
+  if (cleaningUp) return;
+  cleaningUp = true;
+  await Promise.all([...sandboxes.values()].map(killSandbox));
+  sandboxes.clear();
+}
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    cleanupAll().finally(() => process.exit(0));
+  });
+}
 
 const server = new Server(
   { name: "opencode-sandbox", version: "1.0.0" },
@@ -83,8 +113,14 @@ function textResult(text, isError = false) {
 async function provision({ name, project_id }) {
   if (!API_KEY) return textResult("provision failed: E2B_API_KEY not set", true);
   if (!name) return textResult("provision failed: name is required", true);
+  // Reusing a name replaces the old sandbox — kill it first so it isn't leaked.
+  const existing = sandboxes.get(name);
+  if (existing) await killSandbox(existing);
   try {
-    const sandbox = await Sandbox.create(TEMPLATE, { apiKey: API_KEY });
+    const sandbox = await Sandbox.create(TEMPLATE, {
+      apiKey: API_KEY,
+      timeoutMs: SANDBOX_TIMEOUT_MS,
+    });
     sandboxes.set(name, sandbox.sandboxId);
     return textResult(
       `sandbox "${name}" provisioned (e2b ${sandbox.sandboxId}, template ${TEMPLATE})`,
