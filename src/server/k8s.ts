@@ -1546,6 +1546,7 @@ export async function createInlineHarnessDeployment(image: string): Promise<void
       template: {
         metadata: { labels },
         spec: {
+          priorityClassName: "platform-critical",
           terminationGracePeriodSeconds: 600,
           containers: [
             {
