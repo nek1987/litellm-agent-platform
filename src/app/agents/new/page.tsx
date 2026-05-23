@@ -125,6 +125,7 @@ export default function NewAgentPage() {
   const [branchOverride, setBranchOverride] = useState("");
   const [pfpUrl, setPfpUrl] = useState<string | null>(null);
   const [envVars, setEnvVars] = useState<[string, string][]>([["", ""]]);
+  const [envVarHosts, setEnvVarHosts] = useState<Record<string, string[]>>({});
   const [enabledTools, setEnabledTools] = useState<EnabledTools>(new Map());
   const [mcpToolTotals, setMcpToolTotals] = useState<Map<string, number>>(new Map());
 
@@ -172,6 +173,16 @@ export default function NewAgentPage() {
       return;
     }
 
+    // Every secret must declare at least one allowed host — that's the whole
+    // point of the per-secret scoping.
+    const unscoped = envVars
+      .map(([k]) => k.trim())
+      .filter((k) => k && !(envVarHosts[k]?.length));
+    if (unscoped.length > 0) {
+      setError(`Set at least one allowed host for: ${unscoped.join(", ")}`);
+      return;
+    }
+
     setSubmitting(true);
     try {
       const mcpServers: string[] = [];
@@ -193,6 +204,21 @@ export default function NewAgentPage() {
         const key = k.trim();
         if (key) envVarsRecord[key] = v;
       }
+      // Keep only host lists for credentials that still exist on submit, and
+      // derive the agent's egress allowlist from the union of all per-secret
+      // hosts — there's no separate global list.
+      const finalEnvVarHosts: Record<string, string[]> = {};
+      for (const key of Object.keys(envVarsRecord)) {
+        if (envVarHosts[key]?.length) finalEnvVarHosts[key] = envVarHosts[key];
+      }
+      // Egress = per-secret hosts ∪ the project template's non-secret hosts, so
+      // a template's allow_out (e.g. a public endpoint the agent browses without
+      // auth) isn't dropped just because it isn't tied to a credential.
+      const projAllowOut =
+        projects.find((s) => s.id === selectedProjectId)?.allow_out ?? [];
+      const derivedAllowOut = [
+        ...new Set([...projAllowOut, ...Object.values(finalEnvVarHosts).flat()]),
+      ];
 
       // If a template is selected and the user edited the skill panel, merge back.
       let finalPrompt = systemPrompt.trim() || undefined;
@@ -243,7 +269,8 @@ export default function NewAgentPage() {
         mcp_servers: mcpServers.length > 0 ? mcpServers : undefined,
         mcp_allowed_tools: mcpAllowedTools.length > 0 ? mcpAllowedTools : undefined,
         env_vars: Object.keys(envVarsRecord).length > 0 ? envVarsRecord : undefined,
-        allow_out: selectedProject?.allow_out,
+        env_var_hosts: Object.keys(finalEnvVarHosts).length > 0 ? finalEnvVarHosts : undefined,
+        allow_out: derivedAllowOut,
         deny_out: selectedProject?.deny_out,
         sandbox_files: selectedProject?.files,
         skill_ids: pickedSkillIds.length > 0 ? pickedSkillIds : undefined,
@@ -407,6 +434,7 @@ export default function NewAgentPage() {
                 skillMode={skillMode} onSkillModeChange={setSkillMode}
                 skillSaveToLibrary={skillSaveToLibrary} onSkillSaveToLibraryChange={setSkillSaveToLibrary}
                 envVars={envVars} onEnvVarsChange={setEnvVars}
+                envVarHosts={envVarHosts} onEnvVarHostsChange={setEnvVarHosts}
                 enabledTools={enabledTools}
                 onEnabledToolsChange={(v) => setEnabledTools(v as Parameters<typeof setEnabledTools>[0])}
                 onMcpToolTotals={setMcpToolTotals}

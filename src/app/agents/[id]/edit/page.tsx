@@ -44,6 +44,12 @@ export default function EditAgentPage({ params }: PageProps) {
   const [branchOverride, setBranchOverride] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [envVars, setEnvVars] = useState<[string, string][]>([["", ""]]);
+  const [envVarHosts, setEnvVarHosts] = useState<Record<string, string[]>>({});
+  // The agent's existing egress allowlist. Egress is derived from per-secret
+  // hosts, but an agent may also have non-secret hosts (set via API/migration);
+  // we preserve those across a save instead of letting the derived list clobber
+  // them. Holds the loaded value for the lifetime of the edit.
+  const existingAllowOutRef = useRef<string[]>([]);
 
   // Skills
   const [pickedSkillIds, setPickedSkillIds] = useState<string[]>([]);
@@ -82,6 +88,8 @@ export default function EditAgentPage({ params }: PageProps) {
         // Env vars
         const pairs = Object.entries(a.env_vars ?? {});
         setEnvVars(pairs.length > 0 ? pairs : [["", ""]]);
+        setEnvVarHosts(a.env_var_hosts ?? {});
+        existingAllowOutRef.current = a.allow_out ?? [];
         // Pre-populate existing library skill attachments so they're visible and detachable.
         setPickedSkillIds(a.attached_skill_ids ?? []);
         // Pre-populate projects from agent data so editing doesn't wipe them on save.
@@ -156,12 +164,36 @@ export default function EditAgentPage({ params }: PageProps) {
           : skillInstructions.trim();
       }
 
+      // Every secret must declare at least one allowed host.
+      const unscoped = envVars
+        .map(([k]) => k.trim())
+        .filter((k) => k && !(envVarHosts[k]?.length));
+      if (unscoped.length > 0) {
+        setSaveError(`Set at least one allowed host for: ${unscoped.join(", ")}`);
+        setSaving(false);
+        return;
+      }
+
       // Env vars
       const envVarsRecord: Record<string, string> = {};
       for (const [k, v] of envVars) {
         const key = k.trim();
         if (key) envVarsRecord[key] = v;
       }
+      // Keep host lists for surviving secrets; derive egress from their union.
+      const finalEnvVarHosts: Record<string, string[]> = {};
+      for (const key of Object.keys(envVarsRecord)) {
+        if (envVarHosts[key]?.length) finalEnvVarHosts[key] = envVarHosts[key];
+      }
+      // Egress = per-secret hosts ∪ any pre-existing non-secret hosts the agent
+      // already had, so opening the form and saving never silently drops hosts
+      // that aren't tied to a credential.
+      const derivedAllowOut = [
+        ...new Set([
+          ...existingAllowOutRef.current,
+          ...Object.values(finalEnvVarHosts).flat(),
+        ]),
+      ];
 
       // MCP — only update if user touched the picker
       let mcpServers: string[] | undefined;
@@ -189,6 +221,8 @@ export default function EditAgentPage({ params }: PageProps) {
         branch: branchOverride.trim() || "main",
         prompt: finalPrompt,
         env_vars: envVarsRecord,
+        env_var_hosts: finalEnvVarHosts,
+        allow_out: derivedAllowOut,
         ...(mcpTouched.current && { mcp_servers: mcpServers, mcp_allowed_tools: mcpAllowedTools }),
         ...(harnessId === BRAIN_INLINE_HARNESS_ID && {
           projects: selectedProjects.map((p): ProjectConfig => ({
@@ -261,6 +295,7 @@ export default function EditAgentPage({ params }: PageProps) {
           skillMode={skillMode} onSkillModeChange={setSkillMode}
           skillSaveToLibrary={skillSaveToLibrary} onSkillSaveToLibraryChange={setSkillSaveToLibrary}
           envVars={envVars} onEnvVarsChange={setEnvVars}
+          envVarHosts={envVarHosts} onEnvVarHostsChange={setEnvVarHosts}
           enabledTools={enabledTools}
           onEnabledToolsChange={(v) => {
             mcpTouched.current = true;

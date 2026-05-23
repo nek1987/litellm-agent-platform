@@ -22,6 +22,7 @@ import type {
 } from "@prisma/client";
 import { z } from "zod";
 import { isValidCron } from "@/server/automations";
+import { hostAllowedByList, isValidEgressHost } from "@/lib/egress-hosts";
 import { decrypt, encrypt } from "@/server/integrations/core/crypto";
 import type { SessionOrigin } from "@/server/integrations/core/origin";
 import { parseAttachedSkillIds } from "@/server/skill-prompt";
@@ -123,6 +124,25 @@ const SANDBOX_FILES_MAX_TOTAL_B64 = 10 * 1024 * 1024; // 10 MB of base64
 // API request schemas (zod) — handlers parse with these
 // ============================================================================
 
+// Per-credential host binding: maps an env var name to the hosts the vault may
+// swap its real value into. Shared by the create + update bodies. Only the host
+// *syntax* is validated here; the cross-field checks (key exists, host is in
+// allow_out) need the rest of the agent and run in the route.
+const envVarHostsSchema = z
+  .record(z.string().regex(ENV_VAR_NAME_RE, "invalid env var name"), z.array(z.string()))
+  .optional()
+  .refine(
+    (v) => !v || Object.values(v).every((hosts) => hosts.every(isValidEgressHost)),
+    { message: "env_var_hosts: each host must be a domain, *.wildcard, IP, or CIDR" },
+  );
+
+// A single egress entry (allow_out / deny_out item): domain, *.wildcard, IP, or
+// CIDR. Validated up front so a malformed host can't be silently dropped by the
+// vault's parser, leaving a narrower-than-intended allowlist.
+const egressHostEntry = z.string().refine(isValidEgressHost, {
+  message: "must be a domain, *.wildcard, IP, or CIDR",
+});
+
 export const CreateAgentBody = z.object({
   name: z.string().optional(),
   model: z.string().min(1),
@@ -138,8 +158,8 @@ export const CreateAgentBody = z.object({
   branch: z.string().optional(),
   pfp_url: z.string().optional(),
   mcp_servers: z.array(z.string()).default([]),
-  allow_out: z.array(z.string()).default([]),
-  deny_out: z.array(z.string()).default([]),
+  allow_out: z.array(egressHostEntry).default([]),
+  deny_out: z.array(egressHostEntry).default([]),
   sandbox_files: z
     .array(SandboxFileSpecSchema)
     .max(SANDBOX_FILES_MAX_COUNT, `sandbox_files: max ${SANDBOX_FILES_MAX_COUNT} files`)
@@ -193,6 +213,13 @@ export const CreateAgentBody = z.object({
         message: `env_vars cannot override reserved keys: ${[...RESERVED_ENV_KEYS].join(", ")}`,
       },
     ),
+  /**
+   * Per-credential egress binding: `{ "<ENV_KEY>": ["api.linear.app"] }`. The
+   * vault only swaps a credential's real value into requests bound for one of
+   * its hosts. Cross-field rules (key ∈ env_vars, host ∈ allow_out) are checked
+   * in the route via `validateEnvVarHosts` — here we only validate host syntax.
+   */
+  env_var_hosts: envVarHostsSchema,
 });
 export type CreateAgentBody = z.infer<typeof CreateAgentBody>;
 
@@ -238,6 +265,12 @@ export const UpdateAgentBody = z.object({
         message: `env_vars cannot override reserved keys: ${[...RESERVED_ENV_KEYS].join(", ")}`,
       },
     ),
+  /** Replace the agent's egress allowlist (per-agent host scoping). */
+  allow_out: z.array(egressHostEntry).optional(),
+  /** Replace the agent's egress denylist. */
+  deny_out: z.array(egressHostEntry).optional(),
+  /** Replace per-credential host bindings. See CreateAgentBody.env_var_hosts. */
+  env_var_hosts: envVarHostsSchema,
 });
 export type UpdateAgentBody = z.infer<typeof UpdateAgentBody>;
 
@@ -450,6 +483,8 @@ export interface ApiAgent {
   pfp_url: string | null;
   mcp_servers: string[];
   env_vars: Record<string, string>;
+  /** Per-credential egress binding: env var name → hosts its value may reach. */
+  env_var_hosts: Record<string, string[]>;
   /**
    * IDs of skills currently attached to this agent, in attach order.
    * Parsed from `<!-- skill:<id> -->` markers in `prompt`. Empty array
@@ -929,6 +964,43 @@ export function encryptEnvVars(
   );
 }
 
+/** Coerce a stored env_var_hosts JSON blob into a clean `{key: string[]}` map. */
+export function parseEnvVarHosts(stored: unknown): Record<string, string[]> {
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(stored as Record<string, unknown>)) {
+    if (Array.isArray(v)) {
+      out[k] = v.filter((h): h is string => typeof h === "string");
+    }
+  }
+  return out;
+}
+
+/**
+ * Cross-field validation for per-credential host bindings: every bound key must
+ * be a defined env var, and every bound host must be inside the agent's egress
+ * allowlist — otherwise the vault could be told to swap a credential into a host
+ * the agent isn't even allowed to reach. Returns an error string, or null if OK.
+ */
+export function validateEnvVarHosts(
+  envVarKeys: Iterable<string>,
+  allowOut: string[],
+  envVarHosts: Record<string, string[]>,
+): string | null {
+  const keys = new Set(envVarKeys);
+  for (const [key, hosts] of Object.entries(envVarHosts)) {
+    if (!keys.has(key)) return `env_var_hosts: '${key}' is not a defined env var`;
+    for (const h of hosts) {
+      // Wildcard-aware: a bound host counts as allowed if any allow_out rule
+      // matches it (e.g. api.x.com is covered by *.x.com), matching the vault.
+      if (!hostAllowedByList(h, allowOut)) {
+        return `env_var_hosts: host '${h}' for '${key}' is not in the agent's allowed hosts`;
+      }
+    }
+  }
+  return null;
+}
+
 /** Decrypt each value in a stored env vars map. Skips entries that fail to decrypt. */
 function decryptEnvVars(stored: Record<string, unknown>): Record<string, string> {
   const result: Record<string, string> = {};
@@ -965,6 +1037,7 @@ export function toApiAgent(row: AgentRow): ApiAgent {
         )
       : [],
     env_vars: decryptEnvVars(rawEnvVars),
+    env_var_hosts: parseEnvVarHosts((row as Record<string, unknown>).env_var_hosts),
     attached_skill_ids: parseAttachedSkillIds(row.prompt),
     allow_out: Array.isArray(row.allow_out) ? (row.allow_out as string[]) : [],
     deny_out: Array.isArray(row.deny_out) ? (row.deny_out as string[]) : [],

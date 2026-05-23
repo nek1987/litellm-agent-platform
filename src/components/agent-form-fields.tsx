@@ -10,7 +10,9 @@ import { PfpUpload } from "@/components/pfp-upload";
 import { HarnessPicker, HARNESS_OPTIONS, DEFAULT_HARNESS_ID } from "@/components/harness-picker";
 import { ModelPicker } from "@/components/model-picker";
 import { McpToolsPicker, EnabledTools, EnabledToolsUpdater } from "@/components/mcp-tools-picker";
+import { EgressHostsEditor } from "@/components/egress-hosts-editor";
 import { SkillRow, listSkills } from "@/lib/api";
+import { suggestHostsForKey } from "@/lib/egress-hosts";
 import { cn } from "@/lib/utils";
 
 export { DEFAULT_HARNESS_ID };
@@ -43,6 +45,13 @@ export interface AgentFormFieldsProps {
   onSkillSaveToLibraryChange: (v: boolean) => void;
   envVars: [string, string][];
   onEnvVarsChange: (v: [string, string][]) => void;
+  /**
+   * Per-secret allowed hosts: env var name → the hosts that secret's value may
+   * be sent to. The agent's egress allowlist is derived from the union of these
+   * by the page on submit — there's no separate global host list.
+   */
+  envVarHosts: Record<string, string[]>;
+  onEnvVarHostsChange: (v: Record<string, string[]>) => void;
   enabledTools: EnabledTools;
   onEnabledToolsChange: (v: EnabledTools | EnabledToolsUpdater) => void;
   onMcpToolTotals?: (totals: Map<string, number>) => void;
@@ -97,6 +106,7 @@ export function AgentFormFields({
   skillMode, onSkillModeChange,
   skillSaveToLibrary, onSkillSaveToLibraryChange,
   envVars, onEnvVarsChange,
+  envVarHosts, onEnvVarHostsChange,
   enabledTools, onEnabledToolsChange,
   onMcpToolTotals,
   disabled = false,
@@ -115,7 +125,25 @@ export function AgentFormFields({
   }, [pickedSkillIds.length]);
 
   function setEnvKey(idx: number, key: string) {
+    const oldKey = envVars[idx]?.[0] ?? "";
     onEnvVarsChange(envVars.map((p, i) => (i === idx ? [key, p[1]] : p)));
+    if (oldKey === key) return;
+    const next = { ...envVarHosts };
+    // Carry any host list over to the renamed key so it isn't silently lost.
+    const carried = next[oldKey];
+    delete next[oldKey];
+    const trimmed = key.trim();
+    if (trimmed) {
+      if (carried && carried.length > 0) {
+        next[trimmed] = carried;
+      } else {
+        // First time we see a recognised secret name, pre-fill its hosts from
+        // the heuristic (e.g. LINEAR_API_KEY → api.linear.app). User can edit.
+        const suggested = suggestHostsForKey(trimmed);
+        if (suggested.length > 0) next[trimmed] = suggested;
+      }
+    }
+    onEnvVarHostsChange(next);
   }
   function setEnvVal(idx: number, val: string) {
     onEnvVarsChange(envVars.map((p, i) => (i === idx ? [p[0], val] : p)));
@@ -124,8 +152,21 @@ export function AgentFormFields({
     onEnvVarsChange([...envVars, ["", ""]]);
   }
   function removeEnvRow(idx: number) {
+    const removedKey = envVars[idx]?.[0] ?? "";
     const next = envVars.filter((_, i) => i !== idx);
     onEnvVarsChange(next.length === 0 ? [["", ""]] : next);
+    if (removedKey && envVarHosts[removedKey]) {
+      const nextHosts = { ...envVarHosts };
+      delete nextHosts[removedKey];
+      onEnvVarHostsChange(nextHosts);
+    }
+  }
+  // Replace the allowed-host list for one secret.
+  function setHostsForKey(key: string, hosts: string[]) {
+    const updated = { ...envVarHosts };
+    if (hosts.length > 0) updated[key] = hosts;
+    else delete updated[key];
+    onEnvVarHostsChange(updated);
   }
 
   function handleEnvFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -500,7 +541,7 @@ export function AgentFormFields({
         ) : null}
       </div>
 
-      {/* Env vars */}
+      {/* Env vars — each secret carries its own allowed hosts */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
           <Label>Environment variables (optional)</Label>
@@ -522,43 +563,63 @@ export function AgentFormFields({
           </label>
         </div>
         <p className="text-xs text-muted-foreground">
-          Injected into every session container. Stored encrypted in DB. Per-session env vars take precedence.
+          Injected into every session container, stored encrypted. For each secret,
+          set the hosts its value may be sent to — the vault only swaps the real
+          value into requests for those hosts, so it can&apos;t leak anywhere else.
         </p>
         <div className="rounded-lg border bg-card">
           <ul className="divide-y">
-            {envVars.map(([k, v], idx) => (
-              <li key={idx} className="flex items-center gap-2 px-2 py-1.5">
-                <Input
-                  value={k}
-                  onChange={(e) => setEnvKey(idx, e.target.value)}
-                  placeholder="KEY"
-                  disabled={disabled}
-                  className="h-7 flex-1 font-mono text-xs uppercase"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <span className="shrink-0 text-[11px] text-muted-foreground">=</span>
-                <Input
-                  value={v}
-                  onChange={(e) => setEnvVal(idx, e.target.value)}
-                  placeholder="value"
-                  disabled={disabled}
-                  className="h-7 flex-[2] font-mono text-xs"
-                  autoComplete="off"
-                  spellCheck={false}
-                  type="password"
-                />
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => removeEnvRow(idx)}
-                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive disabled:opacity-40"
-                  aria-label="Remove row"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </li>
-            ))}
+            {envVars.map(([k, v], idx) => {
+              const key = k.trim();
+              return (
+                <li key={idx} className="flex flex-col gap-2 px-2 py-2">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={k}
+                      onChange={(e) => setEnvKey(idx, e.target.value)}
+                      placeholder="KEY"
+                      disabled={disabled}
+                      className="h-7 flex-1 font-mono text-xs uppercase"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <span className="shrink-0 text-[11px] text-muted-foreground">=</span>
+                    <Input
+                      value={v}
+                      onChange={(e) => setEnvVal(idx, e.target.value)}
+                      placeholder="value"
+                      disabled={disabled}
+                      className="h-7 flex-[2] font-mono text-xs"
+                      autoComplete="off"
+                      spellCheck={false}
+                      type="password"
+                    />
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => removeEnvRow(idx)}
+                      className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive disabled:opacity-40"
+                      aria-label="Remove row"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                  {key ? (
+                    <div className="rounded-md border border-dashed bg-muted/30 px-2 py-1.5">
+                      <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Allowed hosts for {key}
+                      </p>
+                      <EgressHostsEditor
+                        value={envVarHosts[key] ?? []}
+                        onChange={(hosts) => setHostsForKey(key, hosts)}
+                        disabled={disabled}
+                        required
+                      />
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
           <div className="border-t px-2 py-1.5">
             <button

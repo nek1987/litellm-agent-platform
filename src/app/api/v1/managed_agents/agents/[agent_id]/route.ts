@@ -10,10 +10,12 @@
 import { assertAuth } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { invalidateWarmTasks } from "@/server/memory";
+import { hostAllowedByList } from "@/lib/egress-hosts";
 import {
   encryptEnvVars,
   HARNESS_BRAIN_INLINE,
   httpError,
+  parseEnvVarHosts,
   RESERVED_ENV_KEYS,
   toApiAgent,
   UpdateAgentBody,
@@ -53,6 +55,8 @@ export const PATCH = wrap<RouteContext>(async (req, ctx) => {
     data.preload_memory_limit = body.preload_memory_limit;
   }
   if (body.projects !== undefined) data.projects = body.projects as Prisma.InputJsonValue;
+  if (body.allow_out !== undefined) data.allow_out = body.allow_out as Prisma.InputJsonValue;
+  if (body.deny_out !== undefined) data.deny_out = body.deny_out as Prisma.InputJsonValue;
 
   const existing = await prisma.agent.findUnique({ where: { agent_id } });
   if (existing === null) httpError(404, `agent '${agent_id}' not found`);
@@ -65,6 +69,68 @@ export const PATCH = wrap<RouteContext>(async (req, ctx) => {
     httpError(400, {
       error: `harness_id "${HARNESS_BRAIN_INLINE}" requires at least one project entry in "projects"`,
     });
+  }
+
+  // Reconcile per-credential host bindings against the agent's *effective* state
+  // (this PATCH merged onto the existing row). In this model env_var_hosts is the
+  // source of truth and allow_out is derived from it, so a binding host is only
+  // ever removed by an explicit env_var_hosts edit — never silently because the
+  // env var was deleted (key pruned) or allow_out was narrowed. To keep the two
+  // consistent we instead guarantee allow_out covers every bound host below.
+  if (
+    body.env_var_hosts !== undefined ||
+    body.allow_out !== undefined ||
+    body.env_vars !== undefined
+  ) {
+    const provided = body.env_var_hosts;
+    const source = provided ?? parseEnvVarHosts((existing as Record<string, unknown>).env_var_hosts);
+    const effectiveAllow =
+      body.allow_out ??
+      (Array.isArray(existing!.allow_out) ? (existing!.allow_out as string[]) : []);
+    const effectiveKeys = new Set(
+      body.env_vars
+        ? Object.keys(body.env_vars)
+        : Object.keys(
+            existing!.env_vars && typeof existing!.env_vars === "object" && !Array.isArray(existing!.env_vars)
+              ? (existing!.env_vars as Record<string, unknown>)
+              : {},
+          ).filter((k) => !RESERVED_ENV_KEYS.has(k)),
+    );
+    const reconciled: Record<string, string[]> = {};
+    for (const [key, hosts] of Object.entries(source)) {
+      // The only silent drop: the env var itself no longer exists (e.g. removed
+      // via the inline editor). Removing a secret legitimately removes its scope.
+      if (!effectiveKeys.has(key)) {
+        if (provided) httpError(400, { error: `env_var_hosts: '${key}' is not a defined env var` });
+        continue;
+      }
+      // When the caller sets bindings explicitly, every host must be allowed
+      // (wildcard-aware, mirroring the vault) — a bad host is a 400, not a drop.
+      if (provided && !hosts.every((h) => hostAllowedByList(h, effectiveAllow))) {
+        httpError(400, {
+          error: `env_var_hosts: a host for '${key}' is not in the agent's allowed hosts`,
+        });
+      }
+      // Preserve all hosts. Crucially we do NOT filter by allow_out here: a
+      // narrowed allow_out must never silently un-scope a credential.
+      if (hosts.length > 0) reconciled[key] = hosts;
+    }
+    // Derive: allow_out must cover every bound host. If this PATCH narrows
+    // allow_out below a binding, add the missing hosts back rather than leaving
+    // the credential pointing outside the allowlist (which under
+    // EGRESS_DEFAULT_DENY=false degrades to swap-anywhere).
+    if (body.allow_out !== undefined) {
+      const boundHosts = [...new Set(Object.values(reconciled).flat())];
+      const missing = boundHosts.filter((h) => !hostAllowedByList(h, body.allow_out!));
+      if (missing.length > 0) {
+        data.allow_out = [...body.allow_out, ...missing] as Prisma.InputJsonValue;
+      }
+    }
+    if (provided !== undefined || JSON.stringify(reconciled) !== JSON.stringify(source)) {
+      // Cast through unknown — Prisma client not regenerated for the new column.
+      (data as Record<string, unknown>).env_var_hosts =
+        reconciled as unknown as Prisma.InputJsonValue;
+    }
   }
 
   // env_vars replace flow: user supplies the new user-editable map; we

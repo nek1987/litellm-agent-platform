@@ -168,6 +168,8 @@ export interface AgentRow {
   pfp_url?: string | null;
   mcp_servers?: string[];
   env_vars?: Record<string, string>;
+  /** Per-credential egress binding: env var name → hosts its value may reach. */
+  env_var_hosts?: Record<string, string[]>;
   allow_out?: string[];
   deny_out?: string[];
   sandbox_files?: SandboxFileSpec[];
@@ -500,6 +502,8 @@ export interface CreateAgentRequest {
   mcp_servers?: string[];
   mcp_allowed_tools?: McpAllowedTools[];
   env_vars?: Record<string, string>;
+  /** Per-credential egress binding: env var name → hosts its value may reach. */
+  env_var_hosts?: Record<string, string[]>;
   allow_out?: string[];
   deny_out?: string[];
   sandbox_files?: SandboxFileSpec[];
@@ -523,6 +527,12 @@ export interface UpdateAgentRequest {
    * that the user can't see. Re-encrypted at rest.
    */
   env_vars?: Record<string, string>;
+  /** Per-credential egress binding: env var name → hosts its value may reach. */
+  env_var_hosts?: Record<string, string[]>;
+  /** Replace the agent's egress allowlist (per-agent host scoping). */
+  allow_out?: string[];
+  /** Replace the agent's egress denylist. */
+  deny_out?: string[];
   model?: string;
   branch?: string;
   preload_memory_limit?: number;
