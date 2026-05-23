@@ -400,11 +400,25 @@ async function finishBringUp(
     : "";
   const effectivePrompt = (agent.prompt ?? "") + skillEditingBlock;
 
+  // Resolve the agent's attached MCP server IDs → {name, url} specs and forward
+  // them to the harness so external MCPs (Linear, GitHub, etc.) are wired into
+  // the session. Without this the K8s warm/cold paths silently drop external
+  // MCPs — only the brain-inline path resolved them. Each server is reached
+  // through LiteLLM's MCP proxy using the harness's vault-swapped LITELLM_API_KEY,
+  // so no raw credentials flow to the sandbox pod.
+  const rawMcpServerIds = Array.isArray(agent.mcp_servers)
+    ? (agent.mcp_servers as unknown[]).filter((v): v is string => typeof v === "string")
+    : [];
+  const { specs: mcpServers } = await resolveAgentMcpServers(rawMcpServerIds);
+
   const harness_session_id = await harnessCreateSession({
     sandbox_url,
     title: body.title,
     prompt: effectivePrompt || undefined,
     files: allFiles.length > 0 ? allFiles : undefined,
+    mcp_servers: mcpServers,
+    agent_id: agent.agent_id,
+    platform_session_id: session_id,
   });
   registry.observe("session_phase_duration_seconds", { phase: "cloning_repo" }, (Date.now() - cloneStart) / 1000);
   // Flip status=ready as soon as the harness handshake completes. The
