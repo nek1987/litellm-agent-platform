@@ -26,9 +26,10 @@ import {
   expandMessage,
   formatHistoryAsText,
   harnessCreateSession,
+  harnessDeleteSession,
   harnessSendMessage,
 } from "@/server/harness";
-import { runTask, stopTask, waitHttpReady, waitRunningGetUrl } from "@/server/k8s";
+import { inlineHarnessUrl, runTask, stopTask, waitHttpReady, waitRunningGetUrl } from "@/server/k8s";
 import { invalidateSession, putCachedSession } from "@/server/sessionCache";
 import {
   formatSessionMessagesAsText,
@@ -40,6 +41,7 @@ import type {
   HarnessMessageResponse,
   SandboxFileSpec,
 } from "@/server/types";
+import { HARNESS_BRAIN_INLINE } from "@/server/types";
 
 export interface RehydrateResult {
   sandbox_url: string;
@@ -177,6 +179,87 @@ export async function rehydrateSession(
   const files = Array.isArray(rawFiles)
     ? (rawFiles as SandboxFileSpec[])
     : undefined;
+
+  // Brain-inline fast path: no pod needed — reuse the shared harness Deployment.
+  // The generic path below would call runTask() which creates a new k8s sandbox
+  // pod, which is wrong for brain-inline and will always time out.
+  if (agent.harness_id === HARNESS_BRAIN_INLINE) {
+    const inlineUrl =
+      process.env.CLAUDE_CODE_INLINE_URL ||
+      (env.IN_CLUSTER ? inlineHarnessUrl() : null);
+    if (!inlineUrl) throw new Error("CLAUDE_CODE_INLINE_URL not configured for brain-inline rehydrate");
+
+    // Best-effort delete of the old harness session before creating a fresh one.
+    if (opts.oldTaskArn === null) {
+      // For brain-inline, oldTaskArn is null — the old harness_session_id is in
+      // the DB row. Fetch it for cleanup.
+      const row = await prisma.session.findUnique({
+        where: { session_id },
+        select: { harness_session_id: true },
+      });
+      if (row?.harness_session_id) {
+        await harnessDeleteSession({ sandbox_url: inlineUrl, harness_session_id: row.harness_session_id })
+          .catch(() => {});
+      }
+    }
+
+    let harness_session_id: string;
+    try {
+      const rawProjects = (agent as Record<string, unknown>).projects;
+      const projects = Array.isArray(rawProjects)
+        ? (rawProjects as Array<{ id: string; name: string; description: string; repo_url?: string }>)
+        : [];
+      harness_session_id = await harnessCreateSession({
+        sandbox_url: inlineUrl,
+        title: "rehydrate",
+        files,
+        sandbox_tools: true,
+        projects,
+        agent_id: agent.agent_id,
+        platform_session_id: session_id,
+      });
+    } catch (e) {
+      throw new Error(`brain-inline rehydrate: harnessCreateSession failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    console.log(`[rehydrate] session=${session_id} phase=session_created elapsed=${elapsed()} harness_session_id=${harness_session_id} (brain-inline)`);
+
+    const replayText = await buildReplayText(session_id, opts.previousHistory, opts.excludeMessageId);
+    console.log(`[rehydrate] session=${session_id} phase=history_replay elapsed=${elapsed()} chars=${replayText?.length ?? 0}`);
+    let response: HarnessMessageResponse | null = null;
+    if (replayText) {
+      response = await harnessSendMessage({
+        sandbox_url: inlineUrl,
+        harness_session_id,
+        model: agent.model,
+        parts: expandMessage(replayText),
+      });
+      console.log(`[rehydrate] session=${session_id} phase=replay_complete elapsed=${elapsed()}`);
+    }
+
+    await prisma.session.update({
+      where: { session_id },
+      data: {
+        status: "ready",
+        sandbox_url: inlineUrl,
+        harness_session_id,
+        task_arn: null,
+        last_seen_at: new Date(),
+        response: response ? (response as unknown as import("@prisma/client").Prisma.InputJsonValue) : undefined,
+      },
+    });
+    putCachedSession({
+      session_id,
+      agent_id: agent.agent_id,
+      agent_model: agent.model,
+      harness_id: agent.harness_id,
+      sandbox_url: inlineUrl,
+      harness_session_id,
+      status: "ready",
+      sandboxes: null,
+    });
+    console.log(`[rehydrate] session=${session_id} phase=complete elapsed=${elapsed()} sandbox_url=${inlineUrl}`);
+    return { sandbox_url: inlineUrl, harness_session_id, response };
+  }
 
   let new_task_arn: string | null = null;
   try {
