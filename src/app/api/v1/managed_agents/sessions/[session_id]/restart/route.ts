@@ -40,7 +40,9 @@ import {
   harnessSendMessage,
 } from "@/server/harness";
 import {
-  HARNESS_BRAIN_INLINE,
+  HARNESS_OPENCODE_BRAIN_INLINE,
+  inlineHarnessUrlEnv,
+  isInlineHarness,
   HttpError,
   httpError,
   toApiSession,
@@ -82,17 +84,19 @@ export async function POST(req: Request, ctx: RouteContext) {
       ? (row.history as unknown as HarnessMessage[])
       : null;
 
-    // Fast path for brain-inline: delegate to a shared harness server — no K8s pod needed.
-    if (agent.harness_id === HARNESS_BRAIN_INLINE) {
+    // Fast path for inline harnesses: delegate to a shared server — no K8s pod needed.
+    if (isInlineHarness(agent.harness_id)) {
+      const isOpencodeInline = agent.harness_id === HARNESS_OPENCODE_BRAIN_INLINE;
       const inlineUrl =
-        process.env.CLAUDE_CODE_INLINE_URL ||
-        (env.IN_CLUSTER ? inlineHarnessUrl() : null);
+        inlineHarnessUrlEnv(agent.harness_id) ||
+        (!isOpencodeInline && env.IN_CLUSTER ? inlineHarnessUrl() : null);
       if (!inlineUrl) {
+        const name = isOpencodeInline ? "OPENCODE_INLINE_URL" : "CLAUDE_CODE_INLINE_URL";
         await prisma.session.update({
           where: { session_id },
-          data: { status: "failed", failure_reason: "CLAUDE_CODE_INLINE_URL not configured" },
+          data: { status: "failed", failure_reason: `${name} not configured` },
         });
-        return Response.json({ error: "CLAUDE_CODE_INLINE_URL not configured" }, { status: 503 });
+        return Response.json({ error: `${name} not configured` }, { status: 503 });
       }
 
       // Best-effort cleanup: delete the old harness session before creating a
