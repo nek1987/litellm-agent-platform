@@ -72,10 +72,11 @@ export const PATCH = wrap<RouteContext>(async (req, ctx) => {
   }
 
   // Reconcile per-credential host bindings against the agent's *effective* state
-  // (this PATCH merged onto the existing row). Bindings the caller sets
-  // explicitly are validated strictly (bad key/host → 400); bindings only made
-  // stale by an unrelated edit (e.g. deleting an env var via the inline editor,
-  // or narrowing allow_out) are pruned silently so the edit isn't rejected.
+  // (this PATCH merged onto the existing row). In this model env_var_hosts is the
+  // source of truth and allow_out is derived from it, so a binding host is only
+  // ever removed by an explicit env_var_hosts edit — never silently because the
+  // env var was deleted (key pruned) or allow_out was narrowed. To keep the two
+  // consistent we instead guarantee allow_out covers every bound host below.
   if (
     body.env_var_hosts !== undefined ||
     body.allow_out !== undefined ||
@@ -97,20 +98,33 @@ export const PATCH = wrap<RouteContext>(async (req, ctx) => {
     );
     const reconciled: Record<string, string[]> = {};
     for (const [key, hosts] of Object.entries(source)) {
+      // The only silent drop: the env var itself no longer exists (e.g. removed
+      // via the inline editor). Removing a secret legitimately removes its scope.
       if (!effectiveKeys.has(key)) {
         if (provided) httpError(400, { error: `env_var_hosts: '${key}' is not a defined env var` });
         continue;
       }
-      // Wildcard-aware membership (mirrors the vault): a bound host survives if
-      // any allow_out rule matches it, so widening allow_out to *.x.com doesn't
-      // silently erase an api.x.com binding (which would un-scope the secret).
-      const kept = hosts.filter((h) => hostAllowedByList(h, effectiveAllow));
-      if (provided && kept.length !== hosts.length) {
+      // When the caller sets bindings explicitly, every host must be allowed
+      // (wildcard-aware, mirroring the vault) — a bad host is a 400, not a drop.
+      if (provided && !hosts.every((h) => hostAllowedByList(h, effectiveAllow))) {
         httpError(400, {
           error: `env_var_hosts: a host for '${key}' is not in the agent's allowed hosts`,
         });
       }
-      if (kept.length > 0) reconciled[key] = kept;
+      // Preserve all hosts. Crucially we do NOT filter by allow_out here: a
+      // narrowed allow_out must never silently un-scope a credential.
+      if (hosts.length > 0) reconciled[key] = hosts;
+    }
+    // Derive: allow_out must cover every bound host. If this PATCH narrows
+    // allow_out below a binding, add the missing hosts back rather than leaving
+    // the credential pointing outside the allowlist (which under
+    // EGRESS_DEFAULT_DENY=false degrades to swap-anywhere).
+    if (body.allow_out !== undefined) {
+      const boundHosts = [...new Set(Object.values(reconciled).flat())];
+      const missing = boundHosts.filter((h) => !hostAllowedByList(h, body.allow_out!));
+      if (missing.length > 0) {
+        data.allow_out = [...body.allow_out, ...missing] as Prisma.InputJsonValue;
+      }
     }
     if (provided !== undefined || JSON.stringify(reconciled) !== JSON.stringify(source)) {
       // Cast through unknown — Prisma client not regenerated for the new column.
