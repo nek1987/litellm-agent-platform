@@ -20,6 +20,12 @@ export const HARNESS_OPTIONS: HarnessOption[] = [
     mode: "CHAT",
   },
   {
+    id: "opencode-brain-inline",
+    label: "opencode-brain-inline",
+    description: "opencode running inline on the platform — no sandbox warmup. Multi-provider via LiteLLM; provisions compute on demand when it needs to run code.",
+    mode: "CHAT",
+  },
+  {
     id: "opencode",
     label: "opencode",
     description: "Multi-provider via LiteLLM. Default — used by every existing agent.",
