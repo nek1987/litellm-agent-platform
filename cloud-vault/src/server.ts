@@ -385,8 +385,6 @@ const proxy = http.createServer((req, res) => {
     return;
   }
   // Serve CA cert so sandboxes can trust the vault MITM cert with a single curl.
-  // Debug: log every request to identify why /ca.crt returns 404
-  console.log(`[vault-req] method=${req.method} url=${JSON.stringify(req.url)}`);
   if (req.url === "/ca.crt" || req.url === "/ca.pem") {
     res.writeHead(200, { "content-type": "application/x-pem-file" });
     res.end(caCertPem);
