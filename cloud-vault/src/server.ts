@@ -329,6 +329,8 @@ async function leafFor(host: string) {
     signingAlgorithm: ALG,
     extensions: [
       new x509.BasicConstraintsExtension(false, undefined, true),
+      // KeyUsage: digitalSignature required by GnuTLS (used by git on Debian/Ubuntu)
+      new x509.KeyUsagesExtension(x509.KeyUsageFlags.digitalSignature, true),
       new x509.ExtendedKeyUsageExtension(["1.3.6.1.5.5.7.3.1"], true),
       new x509.SubjectAlternativeNameExtension([{ type: "dns", value: host }]),
       await x509.SubjectKeyIdentifierExtension.create(k.publicKey),
