@@ -128,12 +128,13 @@ const LEAF_CERT_RENEW_BEFORE_MS = 30 * 60_000;
 // debug surface is then only reachable from inside the pod (the platform
 // fetch will 401, which the route handler converts to []).
 function deriveInspectToken(): string {
+  // Explicit override takes priority (allows stable token for testing/CI).
+  if (process.env.VAULT_INSPECT_TOKEN) return process.env.VAULT_INSPECT_TOKEN;
   const masterKey = process.env.MASTER_KEY ?? "";
   const hostname = process.env.HOSTNAME ?? "";
   if (masterKey && hostname) {
     return createHmac("sha256", masterKey).update(hostname).digest("hex");
   }
-  if (process.env.VAULT_INSPECT_TOKEN) return process.env.VAULT_INSPECT_TOKEN;
   return randomBytes(32).toString("hex");
 }
 const INSPECT_TOKEN = deriveInspectToken();
