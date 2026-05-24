@@ -29,7 +29,8 @@ const ALG: RsaHashedKeyGenParams = {
   hash: "SHA-256",
 };
 
-const PORT = Number(process.env.VAULT_PORT ?? 14322);
+// Railway sets PORT; VAULT_PORT is for K8s. Prefer PORT so Railway routes traffic correctly.
+const PORT = Number(process.env.PORT ?? process.env.VAULT_PORT ?? 14322);
 const CA_DIR = process.env.VAULT_CA_DIR ?? "/etc/vault-ca";
 
 // ---------------------------------------------------------------------------
@@ -380,6 +381,12 @@ const proxy = http.createServer((req, res) => {
   if (req.url === "/healthz") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ status: "ok", stubs: KV.size }));
+    return;
+  }
+  // Serve CA cert so sandboxes can trust the vault MITM cert with a single curl.
+  if (req.url === "/ca.crt" || req.url === "/ca.pem") {
+    res.writeHead(200, { "content-type": "application/x-pem-file" });
+    res.end(caCertPem);
     return;
   }
   // Debug surface: dump the in-memory ring buffer of interceptions as JSON.
