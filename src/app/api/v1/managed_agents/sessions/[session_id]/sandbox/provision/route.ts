@@ -102,14 +102,9 @@ export async function POST(req: Request, ctx: RouteContext) {
       };
     }
 
-    const { message, envMap } = await provisionSandbox(session_id, body.name, agentWithProject, existingSandboxes);
+    await provisionSandbox(session_id, body.name, agentWithProject, existingSandboxes);
 
-    let responseMessage = message;
-    if (Object.keys(envMap).length > 0) {
-      const envLines = Object.entries(envMap).map(([k, v]) => `${k}=${v}`).join("\n");
-      responseMessage += `\nSetup script completed. Exported environment:\n${envLines}`;
-    }
-    return Response.json({ message: responseMessage });
+    return Response.json({ message: `sandbox '${body.name}' ready` });
   } catch (e) {
     if (e instanceof Response) return e;
     if (e instanceof HttpError)

@@ -538,8 +538,6 @@ export interface UpdateAgentRequest {
   preload_memory_limit?: number;
   /** Projects to attach when using the claude-code-brain-inline harness. */
   projects?: ProjectConfig[];
-  /** Replace the full sandbox_files array. Used to update setup.sh and other seeded files. */
-  sandbox_files?: SandboxFileSpec[];
 }
 
 export function listAgents(): Promise<AgentRow[]> {
