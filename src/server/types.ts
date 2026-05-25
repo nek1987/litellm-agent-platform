@@ -273,6 +273,8 @@ export const UpdateAgentBody = z.object({
   deny_out: z.array(egressHostEntry).optional(),
   /** Replace per-credential host bindings. See CreateAgentBody.env_var_hosts. */
   env_var_hosts: envVarHostsSchema,
+  /** Replace the full sandbox_files array. Used to update setup.sh and other seeded files. */
+  sandbox_files: z.array(SandboxFileSpecSchema).optional(),
 });
 export type UpdateAgentBody = z.infer<typeof UpdateAgentBody>;
 
@@ -732,6 +734,13 @@ export interface ApiDockerfile {
 export interface HarnessMessagePart {
   type: string;
   text?: string;
+  artifact?: {
+    id: string;
+    name: string;
+    mime_type: string;
+    size: number;
+    url: string;
+  };
   [key: string]: unknown;
 }
 
@@ -849,6 +858,12 @@ export interface ServerEnv {
   WARM_POOL_RECENT_AGENT_HOURS: number; // default 24
   WARM_POOL_PRIORITY_AGENT_ID?: string;
   WARM_POOL_PRIORITY_SIZE: number; // default 1
+  // S3 artifact storage — optional. When ARTIFACT_STORAGE="s3" and
+  // AWS_S3_BUCKET is set, the /artifacts route is live; otherwise it
+  // returns 503 and the platform boots unchanged.
+  ARTIFACT_STORAGE?: "s3";
+  AWS_S3_BUCKET?: string;
+  AWS_REGION: string;
 
   /**
    * All process.env entries whose key starts with `CONTAINER_ENV_`, with
