@@ -195,8 +195,15 @@ function ContextView({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!sessionId || !harnessSessionId) return;
+    // No harness yet (session still creating, or failed before bring-up) —
+    // there's nothing to query. Surface that instead of spinning forever.
+    if (!sessionId || !harnessSessionId) {
+      setError("no harness session — context unavailable");
+      return;
+    }
     let cancelled = false;
+    // Clear any stale "no harness" message once the harness is available.
+    setError(null);
     const oc = browserOpencodeClient(sessionId);
     void (async () => {
       try {
@@ -270,6 +277,11 @@ function ContextView({
           label="Tools"
           count={tools?.length ?? 0}
         />
+        {tools && tools.length === 0 && (
+          <div className="px-3 pb-2 text-[11px] text-gray-400">
+            no tools available
+          </div>
+        )}
         <div className="flex flex-wrap gap-1 px-3 pb-2">
           {tools?.map((t) => (
             <span
