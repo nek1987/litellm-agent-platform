@@ -27,11 +27,6 @@ const PORT = Number(process.env.PORT || 4096);
 const CHILD_PORT = Number(process.env.OPENCODE_CHILD_PORT || PORT + 1);
 const UP = `http://127.0.0.1:${CHILD_PORT}`;
 const SKILLS_ROOT = path.join(process.env.HOME || "/home/sandbox", ".claude", "skills");
-<<<<<<< Updated upstream
-
-const log = (...a) => console.log("[inline-adapter]", ...a);
-
-=======
 const DRAIN_TIMEOUT_MS = 30_000;
 const MAX_RESTARTS = 3;
 const HEALTH_INTERVAL_MS = 30_000;
@@ -63,8 +58,6 @@ function probeChild() {
     req.on("timeout", () => { req.destroy(); resolve({ ok: false, err: "timeout" }); });
   });
 }
-
->>>>>>> Stashed changes
 // A SandboxFileSpec is a skill file when its sandbox_path lands in a skills dir
 // and is a SKILL.md. Returns the slug (the directory under skills/), else null.
 // Leading-alnum anchor rejects "." / ".." so a crafted name can't escape the dir.
@@ -142,12 +135,6 @@ const server = http.createServer(async (req, res) => {
 
   if (p === "/" || p === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
-<<<<<<< Updated upstream
-    res.end(JSON.stringify({ harness: "opencode-brain-inline", ok: true }));
-    return;
-  }
-
-=======
     res.end(JSON.stringify({ harness: "opencode-brain-inline", ok: true, draining, inFlight, restartCount }));
     return;
   }
@@ -169,7 +156,6 @@ const server = http.createServer(async (req, res) => {
   res.on("finish", decrement);
   res.on("close", decrement);
 
->>>>>>> Stashed changes
   // POST /session: materialize this agent's skills before opencode creates the
   // session, then forward unchanged (no ?directory — keep the /event bus global).
   if (p === "/session" && req.method === "POST") {
