@@ -92,7 +92,8 @@ COPY --from=aws-iam-authenticator /usr/local/bin/aws-iam-authenticator /usr/loca
 
 # Run as non-root.
 RUN addgroup --system --gid 1001 nodejs \
- && adduser  --system --uid 1001 nextjs
+ && adduser  --system --uid 1001 nextjs \
+ && sed -i 's|nextjs:/sbin/nologin|nextjs:/bin/sh|' /etc/passwd
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
