@@ -194,7 +194,21 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    forward(req.method, p, url.search, Buffer.from(raw), res, p);
+    // Normalize model field: opencode's config always uses provider "litellm"
+    // (regardless of backend). Strip any "provider/" prefix from modelID so
+    // "anthropic/claude-opus-4-7" becomes providerID="litellm" + modelID="claude-opus-4-7".
+    let forwardBody = raw;
+    try {
+      const b = JSON.parse(raw);
+      if (b && b.model && typeof b.model.modelID === "string") {
+        const slash = b.model.modelID.indexOf("/");
+        if (slash > 0) b.model.modelID = b.model.modelID.slice(slash + 1);
+        b.model.providerID = "litellm";
+        forwardBody = JSON.stringify(b);
+      }
+    } catch {}
+
+    forward(req.method, p, url.search, Buffer.from(forwardBody), res, p);
     return;
   }
 
