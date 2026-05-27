@@ -29,7 +29,7 @@ fi
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   INFERENCE_BASE="https://api.anthropic.com/v1"
   INFERENCE_KEY="${ANTHROPIC_API_KEY}"
-  PROVIDER_NAME="anthropic"
+  PROVIDER_NAME="litellm"
   BASE="$INFERENCE_BASE"
   echo "[entrypoint] using direct Anthropic API (model=${LITELLM_DEFAULT_MODEL})"
 else
